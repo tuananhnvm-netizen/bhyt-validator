@@ -9,7 +9,7 @@ from io import BytesIO
 
 st.set_page_config(page_title="Kiểm tra XML BHYT", layout="wide")
 st.title("🔍 KIỂM TRA XML BHYT")
-st.markdown("**TTYT Tân Châu** | Công cụ kiểm tra dữ liệu BHYT")
+st.markdown("**TTYT Châu Thành** | Công cụ kiểm tra dữ liệu BHYT")
 
 # ====================== ICD-10 ======================
 @st.cache_data
