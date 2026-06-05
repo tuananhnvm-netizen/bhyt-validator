@@ -346,19 +346,19 @@ with tab1:
 
 # ==================== TAB 2: SO SÁNH EXCEL ====================
 with tab2:
-    st.markdown("### 📊 So sánh dữ liệu Excel với XML / ICD-10")
+    st.markdown("### 📊 So sánh Excel")
 
     col1, col2 = st.columns(2)
 
     with col1:
-        st.subheader("File ICD-10")
-        icd_file = st.file_uploader("Upload file ICD-10.xlsx",
+        st.subheader("File 1")
+        icd_file = st.file_uploader("Upload file 1.xlsx",
                                     type=["xlsx", "xls"],
                                     key="icd_tab2")
 
     with col2:
-        st.subheader("File HSBA / Dữ liệu cần so sánh")
-        hsba_file = st.file_uploader("Upload file Excel HSBA",
+        st.subheader("File 2 / Dữ liệu cần so sánh")
+        hsba_file = st.file_uploader("Upload file cần so sánh",
                                      type=["xlsx", "xls"],
                                      key="hsba_tab2")
 
