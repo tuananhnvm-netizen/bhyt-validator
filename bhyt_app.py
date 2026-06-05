@@ -27,7 +27,7 @@ MANDATORY_FIELDS_PER_FILE = {
 
 # ==================== TAB 1: KIỂM TRA XML ====================
 with tab1:
-    st.markdown("### TTTYT Tân Châu | Công cụ kiểm tra dữ liệu BHYT")
+    st.markdown("### TTTYT Châu Thành | Công cụ kiểm tra dữ liệu BHYT")
 
     # ====================== ICD-10 ======================
     @st.cache_data
