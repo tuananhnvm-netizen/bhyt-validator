@@ -1,4 +1,8 @@
 import streamlit as st
+import streamlit.components.v1 as components # BỔ SUNG DÒNG NÀY
+import pandas as pd
+from datetime import datetime
+import streamlit as st
 import pandas as pd
 from datetime import datetime
 import os
@@ -12,7 +16,7 @@ st.set_page_config(page_title="Kiểm tra XML BHYT", layout="wide")
 st.title("🔍 KIỂM TRA XML BHYT")
 
 # ==================== TẠO TAB ====================
-tab1, tab2 = st.tabs(["📋 Kiểm tra XML", "📊 So sánh Excel"])
+tab1, tab2, tab3 = st.tabs(["📋 Kiểm tra XML", "📊 So sánh Excel", "🏥 Tra cứu TT06"])
 
 # ==================== GLOBAL DEFINITIONS (FOR BOTH TABS) ====================
 
@@ -387,3 +391,14 @@ with tab2:
 
                 except Exception as e:
                     st.error(f"Lỗi: {e}")
+                    # ==================== TAB 3: KIỂM TRA THÔNG TƯ 06 ====================
+with tab3:
+    try:
+        # Mở và đọc file HTML chứa tool kiểm tra bạn vừa lưu
+        with open("tt06.html", "r", encoding="utf-8") as f:
+            html_source = f.read()
+            
+        # Nhúng nội dung file HTML vào Streamlit với chiều cao 850px và cho phép cuộn trang
+        components.html(html_source, height=850, scrolling=True)
+    except Exception as e:
+        st.error(f"Không thể tải công cụ kiểm tra TT06. Vui lòng đảm bảo file tt06.html đã được up lên cùng thư mục. Chi tiết lỗi: {e}")
