@@ -192,15 +192,21 @@ body{font-family:"Segoe UI",Arial,sans-serif;background:#f0f7ff;min-height:100vh
 <script>
 // ── Load ICD-10 từ GitHub ─────────────────────────────────────────────────────
 // ⚠️ THAY URL NÀY bằng raw URL thực tế sau khi upload lên GitHub
-const ICD10_URL = "https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/icd10.json";
+const ICD10_URL = "https://raw.githubusercontent.com/tuananhnvm-netizen/bhyt-validator/main/icd10.json";
 
 let D = {};
 let gender = "unknown", comps = [""], didChk = false;
 
 async function loadData() {
   try {
-    const res = await fetch(ICD10_URL);
-    if (!res.ok) throw new Error("HTTP " + res.status);
+    // Thêm cache-busting và CORS mode rõ ràng
+    const res = await fetch(ICD10_URL + "?v=" + Date.now(), {
+      method: "GET",
+      mode: "cors",
+      cache: "force-cache",
+      headers: { "Accept": "application/json" }
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status + " - Kiểm tra repo đã Public chưa?");
     D = await res.json();
     const n = Object.keys(D).length.toLocaleString("vi-VN");
     document.getElementById("tcnt").textContent = n;
