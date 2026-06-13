@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kiểm tra mã ICD-10 – TT06/2026</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Segoe UI",Arial,sans-serif;background:#f0f7ff;min-height:100vh}
+.hdr{background:linear-gradient(90deg,#1a5276,#2874a6);color:#fff;padding:12px 18px}
+.hdr-in{display:flex;align-items:center;gap:10px}
+.hdr h1{font-size:16px;font-weight:700}
+.hdr p{font-size:11px;opacity:.85;margin-top:1px}
+.bdg{background:rgba(255,255,255,.18);border-radius:6px;padding:3px 10px;font-size:11px;font-weight:700;margin-left:auto}
+.tabs{background:#fff;border-bottom:2px solid #dce9f5;position:sticky;top:0;z-index:99}
+.tabs-in{display:flex}
+.tab{padding:10px 16px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:600;color:#888;border-bottom:3px solid transparent;margin-bottom:-2px;transition:all .2s}
+.tab.on{color:#1a5276;border-bottom-color:#1a5276}
+.wrap{padding:16px 12px}
+.card{background:#fff;border-radius:12px;padding:16px;margin-bottom:14px;box-shadow:0 1px 6px rgba(0,0,0,.07)}
+.ch{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.ct{font-weight:700;color:#1a5276;font-size:14px}
+.cs{font-size:12px;color:#888;margin-left:8px}
+.cs.red{color:#e74c3c}
+.gbtn{padding:7px 16px;border-radius:20px;border:2px solid #dce9f5;background:#fff;color:#555;cursor:pointer;font-weight:600;font-size:13px;transition:all .2s;margin-right:6px;margin-bottom:5px}
+.gbtn.on{border-color:#1a5276;background:#1a5276;color:#fff}
+.inp{width:100%;padding:10px 13px;border-radius:8px;border:2px solid #dce9f5;font-size:14px;outline:none;transition:border-color .2s;font-family:inherit}
+.inp:focus{border-color:#2874a6}
+.inp.mono{font-family:monospace;letter-spacing:.8px;font-size:14px}
+.btn-chk{width:100%;padding:13px;border-radius:10px;border:none;background:linear-gradient(90deg,#1a5276,#2874a6);color:#fff;font-size:15px;font-weight:700;cursor:pointer;box-shadow:0 3px 10px rgba(26,82,118,.3);margin-top:4px}
+.btn-chk:hover{opacity:.92}
+.btn-sm{background:#eaf3fb;border:1px solid #bdd9f0;border-radius:7px;padding:6px 13px;cursor:pointer;color:#1a5276;font-weight:600;font-size:12px}
+.btn-rm{background:#fdf0f0;border:1px solid #f5c6c6;border-radius:6px;padding:6px 10px;cursor:pointer;color:#c0392b;font-size:13px;flex-shrink:0}
+.btn-use{background:#eaf3fb;border:1px solid #bdd9f0;border-radius:7px;padding:6px 11px;cursor:pointer;color:#1a5276;font-size:12px;font-weight:600;flex-shrink:0;white-space:nowrap}
+.res{margin-top:8px;border-radius:8px;border:1px solid #a9dfbf;overflow:hidden}
+.res.err{border-color:#f5c6c6}
+.res.wrn{border-color:#f7dc6f}
+.res-body{padding:10px 13px;background:#eafaf1}
+.res.err .res-body{background:#fdf0ef}
+.res.wrn .res-body{background:#fef9e7}
+.res-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.res-code{font-family:monospace;font-weight:700;font-size:14px;color:#1a5276}
+.res-name{font-size:13px;color:#333;margin-left:7px}
+.ok-lbl{color:#1e8449;font-size:12px;font-weight:700;flex-shrink:0}
+.msg-e{font-size:12px;color:#c0392b;margin-top:4px;line-height:1.5}
+.msg-w{font-size:12px;color:#7d6608;margin-top:4px;line-height:1.5}
+.sg-btn{width:100%;text-align:left;padding:7px 13px;border:none;border-top:1px solid #dce9f5;background:#f4f8fb;cursor:pointer;color:#2874a6;font-size:12px;font-weight:600}
+.sg-list{padding:8px 13px;background:#f4f8fb}
+.sg-row{display:flex;gap:8px;padding:3px 0;font-size:12px;align-items:center}
+.sg-code{font-family:monospace;font-weight:700;color:#1a5276;min-width:68px}
+.stats{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
+.sbox{flex:1;min-width:110px;border-radius:10px;padding:11px 14px;text-align:center;border:1px solid}
+.sicon{font-size:22px}
+.slbl{font-weight:700;font-size:13px;margin-top:2px}
+.crow{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.cnum{width:22px;text-align:right;color:#aaa;font-size:12px;flex-shrink:0;font-weight:600}
+.cres{margin-left:30px}
+.sh{color:#bbb;text-align:center;padding:30px;font-size:13px}
+.srow{display:flex;gap:10px;padding:11px 0;border-bottom:1px solid #f0f4f8;align-items:flex-start}
+.s-code{font-family:monospace;font-weight:700;color:#1a5276;font-size:14px}
+.s-name{font-size:13px;color:#444;margin-left:5px}
+.btags{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}
+.btag{font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600}
+.scnt{font-size:12px;color:#888;margin-top:4px}
+.rbox{border-left:4px solid;border-radius:10px;padding:14px 16px;margin-bottom:13px}
+.rtitle{font-weight:700;font-size:14px;margin-bottom:8px}
+.ritem{font-size:13px;color:#333;padding:3px 0;display:flex;gap:7px;line-height:1.5}
+.rdot{flex-shrink:0;font-weight:700}
+.fnote{background:#f8f9fa;border:1px solid #dee2e6;border-radius:9px;padding:11px;font-size:11px;color:#777;text-align:center;line-height:1.6}
+.tab-c{display:none}.tab-c.on{display:block}
+#loading{text-align:center;padding:40px;color:#1a5276}
+.spinner{width:40px;height:40px;border:4px solid #dce9f5;border-top-color:#1a5276;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 12px}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="hdr">
+  <div class="hdr-in">
+    <span style="font-size:24px">🏥</span>
+    <div style="flex:1">
+      <h1>Kiểm tra mã ICD-10 – Thông tư 06/2026/TT-BYT</h1>
+      <p>Hiệu lực: 01/7/2026 &bull; <b id="tcnt">Đang tải...</b> mã bệnh chính thức</p>
+    </div>
+    <div class="bdg">Phụ lục TT06</div>
+  </div>
+</div>
+
+<div class="tabs">
+  <div class="tabs-in">
+    <button class="tab on" onclick="goTab('check',this)">✅ Kiểm tra mã bệnh</button>
+    <button class="tab" onclick="goTab('search',this)">🔍 Tra cứu danh mục</button>
+    <button class="tab" onclick="goTab('rules',this)">📋 Quy định TT06</button>
+  </div>
+</div>
+
+<div class="wrap">
+
+<!-- LOADING -->
+<div id="loading">
+  <div class="spinner"></div>
+  <b>Đang tải danh mục ICD-10...</b>
+  <p style="font-size:12px;color:#888;margin-top:6px">Vui lòng chờ trong giây lát</p>
+</div>
+
+<div id="app" style="display:none">
+
+<!-- TAB 1: KIỂM TRA -->
+<div id="tab-check" class="tab-c on">
+  <div class="card">
+    <div class="ch"><span class="ct">👤 Giới tính bệnh nhân</span></div>
+    <div>
+      <button class="gbtn on" onclick="setG('unknown',this)">Chưa xác định</button>
+      <button class="gbtn" onclick="setG('male',this)">🚹 Nam</button>
+      <button class="gbtn" onclick="setG('female',this)">🚺 Nữ</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="ch">
+      <div><span class="ct">🎯 Bệnh chính</span><span class="cs red">* Chỉ 1 mã duy nhất</span></div>
+    </div>
+    <input class="inp mono" type="text" id="mc" placeholder="Nhập mã ICD-10  VD: I10, E11.9, J18.9..."
+      oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')chk()">
+    <div id="mr"></div>
+  </div>
+  <div class="card">
+    <div class="ch">
+      <div><span class="ct">🔗 Bệnh kèm theo</span><span class="cs" id="clbl">Tối đa 12 mã &bull; 0/12</span></div>
+      <button class="btn-sm" id="addBtn" onclick="addC()">+ Thêm mã</button>
+    </div>
+    <div id="clist"></div>
+  </div>
+  <button class="btn-chk" onclick="chk()">🔎 Kiểm tra mã bệnh</button>
+  <div id="stats" class="stats" style="display:none"></div>
+</div>
+
+<!-- TAB 2: TRA CỨU -->
+<div id="tab-search" class="tab-c">
+  <div class="card">
+    <div class="ch"><span class="ct">🔍 Tra cứu danh mục ICD-10 chính thức</span></div>
+    <input class="inp" type="text" id="si"
+      placeholder="Nhập tên bệnh hoặc mã  VD: tăng huyết áp, I10, viêm phổi, tiểu đường..."
+      oninput="srch(this.value)">
+    <div class="scnt" id="scnt"></div>
+    <div id="sres" style="margin-top:12px">
+      <div class="sh">Gõ ít nhất 2 ký tự để tìm kiếm trong <span id="s-total">...</span> mã bệnh</div>
+    </div>
+  </div>
+</div>
+
+<!-- TAB 3: QUY ĐỊNH -->
+<div id="tab-rules" class="tab-c">
+  <div class="rbox" style="background:#d6eaf8;border-color:#2874a6">
+    <div class="rtitle">📅 Hiệu lực thi hành</div>
+    <div class="ritem"><span class="rdot" style="color:#2874a6">•</span><span>Hiệu lực chính: <b>01/7/2026</b> — áp dụng danh mục mã bệnh ICD-10 mới toàn quốc</span></div>
+    <div class="ritem"><span class="rdot" style="color:#2874a6">•</span><span>Khoản 2,3 Điều 5: hiệu lực từ <b>01/6/2026</b> — ký số điện tử &amp; sửa mã Q87.1</span></div>
+    <div class="ritem"><span class="rdot" style="color:#2874a6">•</span><span>Hồ sơ bệnh án đã lưu trước ngày hiệu lực vẫn có giá trị pháp lý</span></div>
+  </div>
+  <div class="rbox" style="background:#d5f5e3;border-color:#1e8449">
+    <div class="rtitle">🎯 Bệnh chính (MA_BENH_CHINH) — Chỉ 1 mã duy nhất</div>
+    <div class="ritem"><span class="rdot" style="color:#1e8449">•</span><span>Ghi DUY NHẤT 1 mã — là bệnh tiêu tốn nhiều nguồn lực nhất</span></div>
+    <div class="ritem"><span class="rdot" style="color:#1e8449">•</span><span>Phải khớp với chẩn đoán xác định khi kết thúc KCB (CHAN_DOAN_RV)</span></div>
+    <div class="ritem"><span class="rdot" style="color:#1e8449">•</span><span>Không dùng: mã cột 24 (cấm), cột 25 (không khuyến khích), cột 27 (chỉ tử vong)</span></div>
+  </div>
+  <div class="rbox" style="background:#fef9e7;border-color:#b7950b">
+    <div class="rtitle">🔗 Bệnh kèm theo (MA_BENH_KT) — Tối đa 12 mã</div>
+    <div class="ritem"><span class="rdot" style="color:#b7950b">•</span><span>Chỉ ghi bệnh đang TỒN TẠI và ảnh hưởng đến điều trị hiện tại</span></div>
+    <div class="ritem"><span class="rdot" style="color:#b7950b">•</span><span><b>KHÔNG ghi</b> bệnh quá khứ đã khỏi hoặc không dùng nguồn lực lần này</span></div>
+    <div class="ritem"><span class="rdot" style="color:#b7950b">•</span><span>Không trùng mã bệnh chính</span></div>
+  </div>
+  <div class="rbox" style="background:#f5eef8;border-color:#7d3c98">
+    <div class="rtitle">⚙️ Ràng buộc cột 24–29 (tool tự kiểm tra)</div>
+    <div class="ritem"><span class="rdot" style="color:#7d3c98">•</span><span>Cột 24: <b>2.338 mã</b> KHÔNG được dùng làm bệnh chính → ❌</span></div>
+    <div class="ritem"><span class="rdot" style="color:#7d3c98">•</span><span>Cột 25: <b>223 mã</b> không khuyến khích làm bệnh chính → ⚠️</span></div>
+    <div class="ritem"><span class="rdot" style="color:#7d3c98">•</span><span>Cột 26: <b>2.057 mã</b> có mã chi tiết hơn → ⚠️ gợi ý thay thế</span></div>
+    <div class="ritem"><span class="rdot" style="color:#7d3c98">•</span><span>Cột 27: <b>17 mã</b> chỉ dùng cho nguyên nhân tử vong → ❌</span></div>
+    <div class="ritem"><span class="rdot" style="color:#7d3c98">•</span><span>Cột 28: <b>918 mã</b> chỉ có ở NỮ — ghi cho nam → ❌</span></div>
+    <div class="ritem"><span class="rdot" style="color:#7d3c98">•</span><span>Cột 29: <b>145 mã</b> chỉ có ở NAM — ghi cho nữ → ❌</span></div>
+  </div>
+  <div class="rbox" style="background:#fdf0ef;border-color:#c0392b">
+    <div class="rtitle">📝 Các trường bắt buộc nhập đầy đủ trong HIS</div>
+    <div class="ritem"><span class="rdot" style="color:#c0392b">•</span><span><b>LY_DO_VV:</b> Lý do đến khám — free text, không giới hạn</span></div>
+    <div class="ritem"><span class="rdot" style="color:#c0392b">•</span><span><b>LY_DO_VNT:</b> Lý do nhập viện — bao gồm triệu chứng lâm sàng</span></div>
+    <div class="ritem"><span class="rdot" style="color:#c0392b">•</span><span><b>CHAN_DOAN_VAO:</b> Chẩn đoán sơ bộ — kể cả chẩn đoán nghi ngờ, phân biệt</span></div>
+    <div class="ritem"><span class="rdot" style="color:#c0392b">•</span><span>Thiếu hoặc sai → có thể bị từ chối thanh toán BHYT</span></div>
+  </div>
+  <div class="fnote">📌 Thông tư 06/2026/TT-BYT &bull; CV 4059/BYT-BH &bull; CV 6087/SYT-NV1 Tây Ninh</div>
+</div>
+
+</div><!-- /app -->
+</div><!-- /wrap -->
+
+<script>
+// ── Load ICD-10 từ GitHub ─────────────────────────────────────────────────────
+// ⚠️ THAY URL NÀY bằng raw URL thực tế sau khi upload lên GitHub
+const ICD10_URL = "https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/icd10.json";
+
+let D = {};
+let gender = "unknown", comps = [""], didChk = false;
+
+async function loadData() {
+  try {
+    const res = await fetch(ICD10_URL);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    D = await res.json();
+    const n = Object.keys(D).length.toLocaleString("vi-VN");
+    document.getElementById("tcnt").textContent = n;
+    document.getElementById("s-total").textContent = n;
+    document.getElementById("loading").style.display = "none";
+    document.getElementById("app").style.display = "block";
+    renderC();
+  } catch(e) {
+    document.getElementById("loading").innerHTML =
+      '<div style="color:#c0392b;font-size:14px;text-align:center">❌ Không tải được dữ liệu ICD-10<br><small>' + e.message + '</small><br><br>' +
+      '<button onclick="loadData()" style="background:#1a5276;color:#fff;border:none;padding:8px 20px;border-radius:8px;cursor:pointer;font-size:13px">🔄 Thử lại</button></div>';
+  }
+}
+loadData();
+
+// ── Tabs ─────────────────────────────────────────────────────────────────────
+function goTab(n, btn) {
+  document.querySelectorAll(".tab-c").forEach(e => e.classList.remove("on"));
+  document.querySelectorAll(".tab").forEach(e => e.classList.remove("on"));
+  document.getElementById("tab-" + n).classList.add("on");
+  btn.classList.add("on");
+  if (n === "search") setTimeout(() => document.getElementById("si").focus(), 100);
+}
+
+// ── Gender ────────────────────────────────────────────────────────────────────
+function setG(g, btn) {
+  gender = g;
+  document.querySelectorAll(".gbtn").forEach(b => b.classList.remove("on"));
+  btn.classList.add("on");
+  if (didChk) chk();
+}
+
+// ── Validate ──────────────────────────────────────────────────────────────────
+function vld(code, role, used) {
+  const entry = D[code];
+  if (!entry) return { ok: false, errors: ['Mã "' + code + '" không tồn tại trong danh mục ICD-10 (TT06/2026)'], warns: [] };
+  const [name, f] = entry;
+  const c24=!!(f&1), c25=!!(f&2), c26=!!(f&4), c27=!!(f&8), c28=!!(f&16), c29=!!(f&32);
+  const errors = [], warns = [];
+  if (role === "main") {
+    if (c24) errors.push("❌ Mã này KHÔNG được dùng làm bệnh chính (cột 24 – TT06)");
+    if (c25) warns.push("⚠️ Không khuyến khích dùng làm bệnh chính – nên chọn mã cụ thể hơn (cột 25)");
+    if (c26) warns.push("⚠️ Có mã 4-5 ký tự chi tiết hơn – nên chọn mã cụ thể hơn (cột 26)");
+    if (c27) errors.push("❌ Mã này chỉ dùng để mã hóa nguyên nhân tử vong (cột 27 – TT06)");
+  }
+  if (role === "comp") {
+    if (c27) errors.push("❌ Mã này chỉ dùng để mã hóa nguyên nhân tử vong");
+    if (used.includes(code)) errors.push("❌ Mã bệnh kèm theo bị trùng lặp");
+  }
+  if (gender === "male" && c28) errors.push("❌ Mã này chỉ có/chủ yếu ở NỮ giới – không phù hợp bệnh nhân nam (cột 28)");
+  if (gender === "female" && c29) errors.push("❌ Mã này chỉ có/chủ yếu ở NAM giới – không phù hợp bệnh nhân nữ (cột 29)");
+  return { ok: true, name, errors, warns };
+}
+
+function sugg(code) {
+  const px = code.substring(0, 3), res = [];
+  for (const [c, [n, f]] of Object.entries(D)) {
+    if (c === code || !c.startsWith(px)) continue;
+    if ((f&1)||(f&8)) continue;
+    if (gender === "male" && (f&16)) continue;
+    if (gender === "female" && (f&32)) continue;
+    res.push({ code: c, name: n });
+    if (res.length >= 6) break;
+  }
+  return res;
+}
+
+function mkRes(r, code, id) {
+  if (!r) return "";
+  const hasE = r.errors.length > 0, hasW = r.warns.length > 0;
+  const cls = hasE ? "err" : hasW ? "wrn" : "";
+  let h = '<div class="res ' + cls + '"><div class="res-body">';
+  if (!r.ok) {
+    h += '<span style="color:#c0392b;font-weight:600;font-size:13px">' + esc(r.errors[0]) + "</span>";
+  } else {
+    h += '<div class="res-top"><div><span class="res-code">' + esc(code) + '</span><span class="res-name">' + esc(r.name) + "</span></div>";
+    if (!hasE && !hasW) h += '<span class="ok-lbl">✓ Hợp lệ</span>';
+    h += "</div>";
+    r.errors.forEach(e => { h += '<div class="msg-e">' + esc(e) + "</div>"; });
+    r.warns.forEach(w => { h += '<div class="msg-w">' + esc(w) + "</div>"; });
+  }
+  h += "</div>";
+  if (r.ok && (hasE || hasW)) {
+    const sg = sugg(code);
+    if (sg.length) {
+      h += '<button class="sg-btn" onclick="tgSg(\'' + id + '\')">💡 Xem mã thay thế gợi ý (' + sg.length + ")</button>";
+      h += '<div id="sg-' + id + '" style="display:none" class="sg-list">';
+      sg.forEach(s => { h += '<div class="sg-row"><span class="sg-code">' + esc(s.code) + "</span><span>" + esc(s.name) + "</span></div>"; });
+      h += "</div>";
+    }
+  }
+  return h + "</div>";
+}
+
+function tgSg(id) {
+  const el = document.getElementById("sg-" + id);
+  const show = el.style.display === "none";
+  el.style.display = show ? "block" : "none";
+  el.previousElementSibling.textContent = el.previousElementSibling.textContent.replace(show ? "Xem" : "Ẩn", show ? "Ẩn" : "Xem");
+}
+
+// ── Check ─────────────────────────────────────────────────────────────────────
+function chk() {
+  didChk = true;
+  const mc = document.getElementById("mc").value.trim().toUpperCase();
+  const mr = mc ? vld(mc, "main", []) : null;
+  document.getElementById("mr").innerHTML = mkRes(mr, mc, "m");
+  const used = [];
+  let te = mr && mr.errors.length > 0 ? 1 : 0;
+  let tw = mr && mr.warns.length > 0 ? 1 : 0;
+  let tk = mc ? 1 : 0;
+  comps.forEach((c, i) => {
+    const el = document.getElementById("cr-" + i);
+    if (!el) return;
+    const code = c.trim().toUpperCase();
+    if (!code) { el.innerHTML = ""; return; }
+    const r = vld(code, "comp", used);
+    used.push(code);
+    el.innerHTML = mkRes(r, code, "c" + i);
+    if (r.errors.length > 0) te++;
+    if (r.warns.length > 0) tw++;
+    tk++;
+  });
+  const sb = document.getElementById("stats");
+  if (tk === 0) { sb.style.display = "none"; return; }
+  sb.style.display = "flex";
+  let sh = "";
+  sh += '<div class="sbox" style="background:' + (te===0?"#eafaf1":"#fdf0ef") + ";border-color:" + (te===0?"#a9dfbf":"#f5c6c6") + '">';
+  sh += '<div class="sicon">' + (te===0?"✅":"❌") + "</div>";
+  sh += '<div class="slbl" style="color:' + (te===0?"#1e8449":"#c0392b") + '">' + (te===0?"Không có lỗi":te+" lỗi vi phạm") + "</div></div>";
+  if (tw > 0) sh += '<div class="sbox" style="background:#fef9e7;border-color:#f7dc6f"><div class="sicon">⚠️</div><div class="slbl" style="color:#b7950b">' + tw + " cảnh báo</div></div>";
+  sh += '<div class="sbox" style="background:#eaf3fb;border-color:#bdd9f0"><div class="sicon">📊</div><div class="slbl" style="color:#1a5276">' + tk + " mã đã kiểm tra</div></div>";
+  sb.innerHTML = sh;
+}
+
+// ── Companions ────────────────────────────────────────────────────────────────
+function addC() { if (comps.length < 12) { comps.push(""); renderC(); } }
+function rmC(i) { comps.splice(i, 1); renderC(); if (didChk) chk(); }
+function renderC() {
+  document.getElementById("addBtn").style.display = comps.length >= 12 ? "none" : "";
+  document.getElementById("clbl").textContent = "Tối đa 12 mã \u2022 " + comps.filter(c => c.trim()).length + "/12";
+  document.getElementById("clist").innerHTML = comps.map((c, i) =>
+    '<div class="crow"><span class="cnum">' + (i+1) + ".</span>" +
+    '<input class="inp mono" type="text" id="ci-' + i + '" value="' + esc(c) + '" placeholder="Mã kèm theo ' + (i+1) + '" ' +
+    'oninput="comps[' + i + ']=this.value.toUpperCase();this.value=this.value.toUpperCase();updCnt()" ' +
+    'onkeydown="if(event.key===\'Enter\')chk()" style="flex:1">' +
+    (comps.length > 1 ? '<button class="btn-rm" onclick="rmC(' + i + ')">✕</button>' : "") +
+    '</div><div class="cres" id="cr-' + i + '"></div>'
+  ).join("");
+}
+function updCnt() {
+  document.getElementById("clbl").textContent = "Tối đa 12 mã \u2022 " + comps.filter(c => c.trim()).length + "/12";
+}
+
+// ── Search ────────────────────────────────────────────────────────────────────
+function srch(q) {
+  const el = document.getElementById("sres"), cnt = document.getElementById("scnt");
+  if (q.length < 2) {
+    el.innerHTML = '<div class="sh">Gõ ít nhất 2 ký tự để tìm kiếm trong <span id="s-total">' + Object.keys(D).length.toLocaleString("vi-VN") + "</span> mã bệnh</div>";
+    cnt.textContent = ""; return;
+  }
+  const lq = q.toLowerCase().normalize("NFD");
+  const res = [];
+  for (const [code, [name, f]] of Object.entries(D)) {
+    if (code.toLowerCase().includes(q.toLowerCase()) || name.toLowerCase().normalize("NFD").includes(lq)) {
+      res.push({ code, name, f });
+      if (res.length >= 30) break;
+    }
+  }
+  cnt.textContent = "Tìm thấy " + res.length + (res.length >= 30 ? " (30 đầu tiên)" : "") + " kết quả";
+  if (!res.length) { el.innerHTML = '<div class="sh">Không tìm thấy mã phù hợp</div>'; return; }
+  el.innerHTML = res.map(item => {
+    const f = item.f;
+    const tags = [
+      (f&1) ? '<span class="btag" style="background:#fdf0ef;color:#c0392b">Cấm làm BC</span>' : "",
+      (f&2) ? '<span class="btag" style="background:#fef9e7;color:#7d6608">Không khuyến khích làm BC</span>' : "",
+      (f&4) ? '<span class="btag" style="background:#eaf3fb;color:#1a5276">Dùng mã chi tiết hơn</span>' : "",
+      (f&8) ? '<span class="btag" style="background:#f5eef8;color:#7d3c98">Chỉ mã tử vong</span>' : "",
+      (f&16) ? '<span class="btag" style="background:#fde8f3;color:#8e1060">Chỉ nữ giới</span>' : "",
+      (f&32) ? '<span class="btag" style="background:#e8f8fd;color:#0e6075">Chỉ nam giới</span>' : "",
+    ].join("");
+    return '<div class="srow"><div style="flex:1"><div><span class="s-code">' + esc(item.code) + '</span><span class="s-name">' + esc(item.name) + "</span></div>" +
+      (tags ? '<div class="btags">' + tags + "</div>" : "") +
+      '</div><button class="btn-use" onclick="useCode(\'' + esc(item.code) + '\')">Dùng mã này</button></div>';
+  }).join("");
+}
+
+function useCode(code) {
+  document.getElementById("mc").value = code;
+  goTab("check", document.querySelectorAll(".tab")[0]);
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+
+renderC();
+</script>
+</body>
+</html>
