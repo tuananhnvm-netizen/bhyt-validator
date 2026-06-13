@@ -354,7 +354,7 @@ with tab2:
 with tab3:
     try:
         # Mở và đọc file HTML chứa tool kiểm tra bạn vừa lưu
-        with open("ICD10-TT06_2.html", "r", encoding="utf-8") as f:
+        with open("tt06.html", "r", encoding="utf-8") as f:
             html_source = f.read()
             
         # Nhúng nội dung file HTML vào Streamlit với chiều cao 850px và cho phép cuộn trang
