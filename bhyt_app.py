@@ -36,7 +36,7 @@ MANDATORY_FIELDS_PER_FILE = {
     ],
     "Thuốc": [
         'MA_LK', 'MA_THUOC', 'TEN_THUOC', 'SO_LUONG', 'DON_GIA',
-        'THANH_TIEN_BH', 'NGAY_YL', 'NGAY_TH_YL', 'NGAY_KQ'
+        'THANH_TIEN_BH', 'NGAY_YL', 'NGAY_TH_YL',
     ],
     "Dịch vụ kỹ thuật": [
         'MA_LK', 'MA_DICH_VU', 'TEN_DICH_VU', 'SO_LUONG', 'DON_GIA_BH',
