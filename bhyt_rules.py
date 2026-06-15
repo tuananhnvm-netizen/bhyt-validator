@@ -922,3 +922,151 @@ def check_hanh_chinh_full(ho_so, all_hanh_chinh=None, danh_muc=None):
     errors.extend(check_nhom1_hanh_chinh(ho_so, ma_lk, danh_muc=danh_muc))
     errors.extend(check_nhom4_thoi_gian_trung_lap(ho_so, "Hành chính", all_hanh_chinh=all_hanh_chinh))
     return errors
+
+
+# =====================================================================
+#  CẬP NHẬT DANH MỤC TỪ FILE GỐC (do người dùng tải lên 1 lần,
+#  tự động lọc và GHI ĐÈ các file danh mục cố định kèm sẵn ứng dụng)
+# =====================================================================
+
+def _save_gia_excel(data_dict, path):
+    """Lưu dict {MA: GIA} ra file Excel 2 cột MA, GIA."""
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["MA", "GIA"])
+    for ma, gia in data_dict.items():
+        ws.append([ma, gia])
+    wb.save(path)
+
+
+def rebuild_gia_thuoc_from_source(file_bytes_or_path):
+    """
+    Nhận file Excel danh mục thuốc GỐC (cấu trúc như FileDanhMucThuoc.xlsx, có
+    các cột MA_THUOC, TEN_THUOC, TEN_HOAT_CHAT, DON_GIA_BH, và tùy chọn TU_NGAY
+    để lấy bản ghi mới nhất cho mỗi mã thuốc).
+
+    Tự động:
+      - Lọc ra danh mục giá thuốc (MA_THUOC, DON_GIA_BH) -> ghi đè
+        danh_muc_gia_thuoc.xlsx
+      - Lọc ra bảng tra MA_THUOC -> TEN_HOAT_CHAT -> ghi đè
+        danh_muc_ma_thuoc_hoatchat.xlsx
+
+    Trả về dict {"so_ma_gia_thuoc": int, "so_ma_hoat_chat": int} để hiển thị
+    cho người dùng. Raise Exception nếu file không đúng cấu trúc tối thiểu.
+    """
+    wb = load_workbook(file_bytes_or_path, data_only=True)
+    sheet = wb.active
+    headers = [str(c.value).strip().upper() if c.value else "" for c in sheet[1]]
+
+    required = ["MA_THUOC", "TEN_THUOC", "TEN_HOAT_CHAT", "DON_GIA_BH"]
+    missing = [c for c in required if c not in headers]
+    if missing:
+        raise ValueError(
+            "File danh mục thuốc thiếu các cột bắt buộc: " + ", ".join(missing) +
+            ". Cần có đủ các cột: MA_THUOC, TEN_THUOC, TEN_HOAT_CHAT, DON_GIA_BH "
+            "(và TU_NGAY nếu muốn lấy bản ghi mới nhất khi 1 mã có nhiều dòng)."
+        )
+
+    idx = {h: headers.index(h) for h in headers if h}
+    idx_ma = idx["MA_THUOC"]
+    idx_ten = idx["TEN_THUOC"]
+    idx_hc = idx["TEN_HOAT_CHAT"]
+    idx_gia = idx["DON_GIA_BH"]
+    idx_tungay = idx.get("TU_NGAY")
+
+    # Gom theo MA_THUOC, nếu có TU_NGAY thì giữ bản ghi có TU_NGAY lớn nhất (mới nhất)
+    records = {}  # ma_thuoc -> (tu_ngay_sortkey, ten_thuoc, hoat_chat, gia)
+    for r in range(2, sheet.max_row + 1):
+        ma = sheet.cell(r, idx_ma + 1).value
+        if ma is None or str(ma).strip() == "":
+            continue
+        ma = str(ma).strip()
+        ten = sheet.cell(r, idx_ten + 1).value
+        hc = sheet.cell(r, idx_hc + 1).value
+        gia = sheet.cell(r, idx_gia + 1).value
+        try:
+            gia_f = float(gia)
+        except (TypeError, ValueError):
+            gia_f = None
+
+        sort_key = ""
+        if idx_tungay is not None:
+            tu_ngay_val = sheet.cell(r, idx_tungay + 1).value
+            sort_key = str(tu_ngay_val) if tu_ngay_val is not None else ""
+
+        prev = records.get(ma)
+        if prev is None or sort_key >= prev[0]:
+            records[ma] = (sort_key, str(ten).strip() if ten else "",
+                            str(hc).strip() if hc else "", gia_f)
+
+    gia_thuoc = {ma: rec[3] for ma, rec in records.items() if rec[3] is not None}
+    ma_thuoc_hoat_chat = {ma: rec[2].lower() for ma, rec in records.items()}
+
+    _save_gia_excel(gia_thuoc, DEFAULT_GIA_THUOC_FILE)
+
+    from openpyxl import Workbook
+    wb_out = Workbook()
+    ws_out = wb_out.active
+    ws_out.append(["MA_THUOC", "TEN_THUOC", "TEN_HOAT_CHAT"])
+    for ma, rec in records.items():
+        ws_out.append([ma, rec[1], rec[2]])
+    wb_out.save(DEFAULT_MA_THUOC_HOATCHAT_FILE)
+
+    return {"so_ma_gia_thuoc": len(gia_thuoc), "so_ma_hoat_chat": len(ma_thuoc_hoat_chat)}
+
+
+def rebuild_gia_dvkt_from_source(file_bytes_or_path):
+    """
+    Nhận file Excel danh mục DVKT/Giường GỐC (cấu trúc như FileDichVuBV.xlsx,
+    có các cột MA_TUONG_DUONG, DON_GIA, và tùy chọn TUNGAY để lấy bản ghi mới
+    nhất cho mỗi mã).
+
+    Tự động lọc ra danh mục giá DVKT (MA, GIA) -> ghi đè danh_muc_gia_dvkt.xlsx.
+
+    Trả về dict {"so_ma_gia_dvkt": int}. Raise Exception nếu file không đúng
+    cấu trúc tối thiểu.
+    """
+    wb = load_workbook(file_bytes_or_path, data_only=True)
+    sheet = wb.active
+    headers = [str(c.value).strip().upper() if c.value else "" for c in sheet[1]]
+
+    required = ["MA_TUONG_DUONG", "DON_GIA"]
+    missing = [c for c in required if c not in headers]
+    if missing:
+        raise ValueError(
+            "File danh mục DVKT thiếu các cột bắt buộc: " + ", ".join(missing) +
+            ". Cần có đủ các cột: MA_TUONG_DUONG, DON_GIA "
+            "(và TUNGAY nếu muốn lấy bản ghi mới nhất khi 1 mã có nhiều dòng)."
+        )
+
+    idx = {h: headers.index(h) for h in headers if h}
+    idx_ma = idx["MA_TUONG_DUONG"]
+    idx_gia = idx["DON_GIA"]
+    idx_tungay = idx.get("TUNGAY")
+
+    records = {}  # ma -> (sort_key, gia)
+    for r in range(2, sheet.max_row + 1):
+        ma = sheet.cell(r, idx_ma + 1).value
+        gia = sheet.cell(r, idx_gia + 1).value
+        if ma is None or str(ma).strip() == "":
+            continue
+        try:
+            gia_f = float(gia)
+        except (TypeError, ValueError):
+            continue
+        ma = str(ma).strip()
+
+        sort_key = ""
+        if idx_tungay is not None:
+            tu_ngay_val = sheet.cell(r, idx_tungay + 1).value
+            sort_key = str(tu_ngay_val) if tu_ngay_val is not None else ""
+
+        prev = records.get(ma)
+        if prev is None or sort_key >= prev[0]:
+            records[ma] = (sort_key, gia_f)
+
+    gia_dvkt = {ma: rec[1] for ma, rec in records.items()}
+    _save_gia_excel(gia_dvkt, DEFAULT_GIA_DVKT_FILE)
+
+    return {"so_ma_gia_dvkt": len(gia_dvkt)}

@@ -18,6 +18,8 @@ from bhyt_rules import (
     _to_datetime,
     load_default_danh_muc,
     merge_danh_muc,
+    rebuild_gia_thuoc_from_source,
+    rebuild_gia_dvkt_from_source,
 )
 
 st.set_page_config(page_title="Kiểm tra XML BHYT", layout="wide")
@@ -168,10 +170,47 @@ with tab1:
         VALID_MA_BENH_CODES = load_icd10_codes()
 
         st.markdown("---")
+        st.subheader("🔄 Cập nhật danh mục từ file gốc")
+        st.caption(
+            "Khi có danh mục thuốc/DVKT trúng thầu mới, chỉ cần tải lên file gốc (đầy đủ cột) "
+            "ở đây - hệ thống tự động lọc và GHI ĐÈ danh mục giá/đối chiếu đang dùng. "
+            "Không cần tự tách file."
+        )
+
+        uploaded_file_thuoc_goc = st.file_uploader(
+            "📄 File danh mục thuốc gốc (như FileDanhMucThuoc.xlsx - cần cột "
+            "MA_THUOC, TEN_THUOC, TEN_HOAT_CHAT, DON_GIA_BH, TU_NGAY)",
+            type=["xlsx"], key="file_thuoc_goc")
+        if uploaded_file_thuoc_goc:
+            try:
+                from io import BytesIO as _BytesIO
+                ket_qua = rebuild_gia_thuoc_from_source(_BytesIO(uploaded_file_thuoc_goc.getvalue()))
+                st.success(
+                    f"✅ Đã cập nhật danh mục giá thuốc ({ket_qua['so_ma_gia_thuoc']} mã) và "
+                    f"bảng tra hoạt chất ({ket_qua['so_ma_hoat_chat']} mã) từ file vừa tải lên."
+                )
+                st.cache_data.clear()
+            except Exception as e:
+                st.error(f"❌ Không thể cập nhật danh mục thuốc: {e}")
+
+        uploaded_file_dvkt_goc = st.file_uploader(
+            "📄 File danh mục DVKT/Giường gốc (như FileDichVuBV.xlsx - cần cột "
+            "MA_TUONG_DUONG, DON_GIA, TUNGAY)",
+            type=["xlsx"], key="file_dvkt_goc")
+        if uploaded_file_dvkt_goc:
+            try:
+                from io import BytesIO as _BytesIO
+                ket_qua = rebuild_gia_dvkt_from_source(_BytesIO(uploaded_file_dvkt_goc.getvalue()))
+                st.success(f"✅ Đã cập nhật danh mục giá DVKT/Giường ({ket_qua['so_ma_gia_dvkt']} mã) từ file vừa tải lên.")
+                st.cache_data.clear()
+            except Exception as e:
+                st.error(f"❌ Không thể cập nhật danh mục DVKT: {e}")
+
+        st.markdown("---")
         st.caption(
             "✅ Đã tích hợp sẵn danh mục giá DVKT/Giường bệnh, giá thuốc trúng thầu và "
             "bảng thuốc chống chỉ định theo ICD-10 của đơn vị (không cần tải lên mỗi lần). "
-            "Các file dưới đây chỉ dùng để BỔ SUNG/GHI ĐÈ nếu cần."
+            "Các mục dưới đây chỉ dùng để BỔ SUNG/GHI ĐÈ thêm nếu cần."
         )
         uploaded_gia_thuoc = st.file_uploader(
             "2. (Tùy chọn) Bổ sung danh mục giá thuốc trúng thầu (cột MA, GIA)", type=["xlsx"], key="gia_thuoc")
