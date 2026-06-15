@@ -24,6 +24,25 @@ Mỗi lỗi trả về là 1 dict với khóa thống nhất:
 
 from datetime import datetime
 import re
+import os
+
+try:
+    from openpyxl import load_workbook
+except ImportError:  # pragma: no cover
+    load_workbook = None
+
+# =====================================================================
+#  DANH MỤC CỐ ĐỊNH ĐI KÈM ỨNG DỤNG (không cần tải lên mỗi lần kiểm tra)
+#  Đặt 3 file Excel này CÙNG THƯ MỤC với bhyt_app.py / bhyt_rules.py:
+#    - danh_muc_gia_dvkt.xlsx          (cột: MA, GIA)
+#    - danh_muc_gia_thuoc.xlsx         (cột: MA, GIA)
+#    - danh_muc_thuoc_chongchidinh.xlsx (cột: HOAT_CHAT_KEYWORD, ICD_CHONGCHIDINH, GHI_CHU)
+# =====================================================================
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_GIA_DVKT_FILE = os.path.join(_BASE_DIR, "danh_muc_gia_dvkt.xlsx")
+DEFAULT_GIA_THUOC_FILE = os.path.join(_BASE_DIR, "danh_muc_gia_thuoc.xlsx")
+DEFAULT_THUOC_CHONGCHIDINH_FILE = os.path.join(_BASE_DIR, "danh_muc_thuoc_chongchidinh.xlsx")
+DEFAULT_MA_THUOC_HOATCHAT_FILE = os.path.join(_BASE_DIR, "danh_muc_ma_thuoc_hoatchat.xlsx")
 
 # =====================================================================
 #  HẰNG SỐ DÙNG CHUNG
@@ -104,6 +123,143 @@ def _err(ma_lk, nhom, muc_do, truong_loi, gia_tri, mo_ta_loi, huong_xu_ly, nguon
         "huong_xu_ly": huong_xu_ly,
         "nguon_file": nguon_file,
     }
+
+
+# =====================================================================
+#  NẠP DANH MỤC CỐ ĐỊNH KÈM SẴN ỨNG DỤNG
+# =====================================================================
+
+def _load_gia_excel(path):
+    """Đọc file Excel 2 cột MA / GIA -> dict {MA: GIA (float)}."""
+    result = {}
+    if not load_workbook or not os.path.exists(path):
+        return result
+    try:
+        wb = load_workbook(path, data_only=True)
+        sheet = wb.active
+        headers = [str(c.value).strip().upper() if c.value else "" for c in sheet[1]]
+        try:
+            idx_ma = headers.index("MA")
+            idx_gia = headers.index("GIA")
+        except ValueError:
+            return result
+        for r in range(2, sheet.max_row + 1):
+            ma = sheet.cell(r, idx_ma + 1).value
+            gia = sheet.cell(r, idx_gia + 1).value
+            if ma is None:
+                continue
+            try:
+                result[str(ma).strip()] = float(gia)
+            except (TypeError, ValueError):
+                continue
+    except Exception:
+        pass
+    return result
+
+
+def _load_thuoc_chongchidinh_excel(path):
+    """
+    Đọc file Excel danh mục thuốc chống chỉ định theo ICD-10.
+    Cột: HOAT_CHAT_KEYWORD | ICD_CHONGCHIDINH (nhiều mã/prefix phân tách ';') | GHI_CHU
+    Trả về list các dict {keyword, icd_prefixes: [...], ghi_chu}
+    """
+    result = []
+    if not load_workbook or not os.path.exists(path):
+        return result
+    try:
+        wb = load_workbook(path, data_only=True)
+        sheet = wb.active
+        headers = [str(c.value).strip().upper() if c.value else "" for c in sheet[1]]
+        try:
+            idx_kw = headers.index("HOAT_CHAT_KEYWORD")
+            idx_icd = headers.index("ICD_CHONGCHIDINH")
+            idx_note = headers.index("GHI_CHU")
+        except ValueError:
+            return result
+        for r in range(2, sheet.max_row + 1):
+            kw = sheet.cell(r, idx_kw + 1).value
+            icd = sheet.cell(r, idx_icd + 1).value
+            note = sheet.cell(r, idx_note + 1).value
+            if not kw or not icd:
+                continue
+            prefixes = [p.strip().upper().replace(".", "") for p in str(icd).split(";") if p.strip()]
+            result.append({
+                "keyword": str(kw).strip().lower(),
+                "icd_prefixes": prefixes,
+                "ghi_chu": (note or "").strip() if note else "",
+            })
+    except Exception:
+        pass
+    return result
+
+
+def _load_ma_thuoc_hoatchat_excel(path):
+    """Đọc bảng MA_THUOC | TEN_THUOC | TEN_HOAT_CHAT -> dict {MA_THUOC: TEN_HOAT_CHAT (lower)}."""
+    result = {}
+    if not load_workbook or not os.path.exists(path):
+        return result
+    try:
+        wb = load_workbook(path, data_only=True)
+        sheet = wb.active
+        headers = [str(c.value).strip().upper() if c.value else "" for c in sheet[1]]
+        try:
+            idx_ma = headers.index("MA_THUOC")
+            idx_hc = headers.index("TEN_HOAT_CHAT")
+        except ValueError:
+            return result
+        for r in range(2, sheet.max_row + 1):
+            ma = sheet.cell(r, idx_ma + 1).value
+            hc = sheet.cell(r, idx_hc + 1).value
+            if ma is None:
+                continue
+            result[str(ma).strip()] = (str(hc).strip().lower() if hc else "")
+    except Exception:
+        pass
+    return result
+
+
+def load_default_danh_muc():
+    """
+    Nạp các danh mục cố định kèm sẵn ứng dụng (đặt cùng thư mục với bhyt_rules.py):
+      - gia_dvkt, gia_thuoc: dict {MA: GIA}
+      - thuoc_chong_chi_dinh: list[{keyword, icd_prefixes, ghi_chu}]
+      - ma_thuoc_hoat_chat: dict {MA_THUOC: ten_hoat_chat (lowercase)}
+    Trả về dict có thể truyền trực tiếp vào tham số `danh_muc` của các hàm check_*.
+    Nếu file không tồn tại, trả về dict rỗng/{} cho mục đó (không lỗi).
+    """
+    return {
+        "gia_dvkt": _load_gia_excel(DEFAULT_GIA_DVKT_FILE),
+        "gia_thuoc": _load_gia_excel(DEFAULT_GIA_THUOC_FILE),
+        "thuoc_chong_chi_dinh": _load_thuoc_chongchidinh_excel(DEFAULT_THUOC_CHONGCHIDINH_FILE),
+        "ma_thuoc_hoat_chat": _load_ma_thuoc_hoatchat_excel(DEFAULT_MA_THUOC_HOATCHAT_FILE),
+    }
+
+
+def merge_danh_muc(*danh_muc_dicts):
+    """
+    Gộp nhiều dict danh mục lại, dict sau ưu tiên ghi đè dict trước cho các
+    danh mục dạng key->value (gia_dvkt, gia_thuoc, icd_chi_dinh), còn danh mục
+    dạng list (thuoc_chong_chi_dinh) sẽ được nối (extend).
+    Dùng để gộp danh mục mặc định (load_default_danh_muc) với danh mục người
+    dùng tải lên thêm trong phiên làm việc.
+    """
+    out = {}
+    for dm in danh_muc_dicts:
+        if not dm:
+            continue
+        for k, v in dm.items():
+            if k not in out:
+                out[k] = v
+                continue
+            if isinstance(v, dict) and isinstance(out[k], dict):
+                merged = dict(out[k])
+                merged.update(v)
+                out[k] = merged
+            elif isinstance(v, list) and isinstance(out[k], list):
+                out[k] = out[k] + v
+            else:
+                out[k] = v
+    return out
 
 
 # =====================================================================
@@ -629,6 +785,40 @@ def check_nhom3_hop_ly_chi_dinh(ho_so_hc, file_type, items_by_malk, ma_lk, danh_
                     ))
             except (ValueError, ZeroDivisionError):
                 pass
+
+    # ---- 3.5 Thuốc chống chỉ định theo mã bệnh ICD-10 (hai chiều) ----
+    thuoc_chong_chi_dinh = danh_muc.get("thuoc_chong_chi_dinh", [])
+    ma_thuoc_hoat_chat = danh_muc.get("ma_thuoc_hoat_chat", {})
+    if thuoc_chong_chi_dinh and cac_ma_benh:
+        cac_ma_benh_nodot = {m.replace(".", "") for m in cac_ma_benh}
+
+        for item in data.get("thuoc", []):
+            ma_thuoc = item.get("MA_THUOC", "")
+            ten_thuoc = item.get("TEN_THUOC", "")
+            hoat_chat = ma_thuoc_hoat_chat.get(ma_thuoc, "") or (ten_thuoc or "").lower()
+
+            for rule in thuoc_chong_chi_dinh:
+                if rule["keyword"] not in hoat_chat:
+                    continue
+                canh_bao_added = False
+                for ma_benh in cac_ma_benh_nodot:
+                    for prefix in rule["icd_prefixes"]:
+                        if ma_benh.startswith(prefix):
+                            errors.append(_err(
+                                ma_lk, "3. Hợp lý chỉ định y khoa", "Cảnh báo",
+                                "MA_THUOC", ma_thuoc,
+                                f"[Gợi ý dược lý - cần xác nhận] Thuốc '{ma_thuoc}' ({ten_thuoc}) chứa "
+                                f"hoạt chất liên quan '{rule['keyword']}', có thể chống chỉ định/thận trọng "
+                                f"với mã bệnh '{ma_benh}' đã ghi nhận trong hồ sơ (MA_BENH_CHINH/MA_BENH_KT). "
+                                f"{rule['ghi_chu']}",
+                                "Rà soát lại chỉ định thuốc này theo hướng dẫn sử dụng/dược lý lâm sàng; "
+                                "nếu việc sử dụng là có cơ sở (đã đánh giá lợi ích/nguy cơ), ghi rõ lý do "
+                                "trong bệnh án. Nếu không phù hợp, xem xét đổi thuốc khác.", nguon
+                            ))
+                            canh_bao_added = True
+                            break
+                    if canh_bao_added:
+                        break
 
     return errors
 
