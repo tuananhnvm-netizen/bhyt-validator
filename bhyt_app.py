@@ -16,6 +16,8 @@ from bhyt_rules import (
     check_nhom2_danh_muc_gia,
     check_nhom3_hop_ly_chi_dinh,
     _to_datetime,
+    load_default_danh_muc,
+    merge_danh_muc,
 )
 
 st.set_page_config(page_title="Kiểm tra XML BHYT", layout="wide")
@@ -39,7 +41,7 @@ MANDATORY_FIELDS_PER_FILE = {
         'THANH_TIEN_BH', 'NGAY_YL', 'NGAY_TH_YL'
     ],
     "Dịch vụ kỹ thuật": [
-        'MA_LK', 'MA_DICH_VU', 'TEN_DICH_VU', 'SO_LUONG', 'DON_GIA_BH',
+        'MA_LK', 'SO_LUONG', 'DON_GIA_BH',
         'THANH_TIEN_BH', 'NGAY_YL'
     ],
     "Mã máy xét nghiệm": ['MA_LK', 'MA_DICH_VU', 'TEN_CHI_SO', 'NGAY_KQ'],
@@ -166,23 +168,38 @@ with tab1:
         VALID_MA_BENH_CODES = load_icd10_codes()
 
         st.markdown("---")
+        st.caption(
+            "✅ Đã tích hợp sẵn danh mục giá DVKT/Giường bệnh, giá thuốc trúng thầu và "
+            "bảng thuốc chống chỉ định theo ICD-10 của đơn vị (không cần tải lên mỗi lần). "
+            "Các file dưới đây chỉ dùng để BỔ SUNG/GHI ĐÈ nếu cần."
+        )
         uploaded_gia_thuoc = st.file_uploader(
-            "2. Danh mục giá thuốc trúng thầu (cột MA, GIA)", type=["xlsx"], key="gia_thuoc")
+            "2. (Tùy chọn) Bổ sung danh mục giá thuốc trúng thầu (cột MA, GIA)", type=["xlsx"], key="gia_thuoc")
         uploaded_gia_dvkt = st.file_uploader(
-            "3. Danh mục giá DVKT (cột MA, GIA)", type=["xlsx"], key="gia_dvkt")
+            "3. (Tùy chọn) Bổ sung danh mục giá DVKT (cột MA, GIA)", type=["xlsx"], key="gia_dvkt")
         uploaded_icd_chidinh = st.file_uploader(
-            "4. Bảng đối chiếu ICD-10 ↔ chỉ định (cột MA_BENH, MA_DICH_VU)", type=["xlsx"], key="icd_chidinh")
+            "4. (Tùy chọn) Bảng đối chiếu ICD-10 ↔ chỉ định (cột MA_BENH, MA_DICH_VU)", type=["xlsx"], key="icd_chidinh")
 
-        DANH_MUC = {}
+        # Danh mục cố định kèm sẵn ứng dụng (giá DVKT/Giường, giá thuốc, thuốc chống chỉ định theo ICD)
+        DANH_MUC_MAC_DINH = load_default_danh_muc()
+        st.success(
+            f"📦 Danh mục mặc định: {len(DANH_MUC_MAC_DINH.get('gia_dvkt', {}))} mã giá DVKT/Giường, "
+            f"{len(DANH_MUC_MAC_DINH.get('gia_thuoc', {}))} mã giá thuốc, "
+            f"{len(DANH_MUC_MAC_DINH.get('thuoc_chong_chi_dinh', []))} quy tắc thuốc chống chỉ định ICD-10."
+        )
+
+        DANH_MUC_BO_SUNG = {}
         if uploaded_gia_thuoc:
-            DANH_MUC["gia_thuoc"] = load_gia_danh_muc(uploaded_gia_thuoc.getvalue())
-            st.success(f"✅ Đã tải {len(DANH_MUC['gia_thuoc'])} mã giá thuốc")
+            DANH_MUC_BO_SUNG["gia_thuoc"] = load_gia_danh_muc(uploaded_gia_thuoc.getvalue())
+            st.success(f"✅ Bổ sung {len(DANH_MUC_BO_SUNG['gia_thuoc'])} mã giá thuốc")
         if uploaded_gia_dvkt:
-            DANH_MUC["gia_dvkt"] = load_gia_danh_muc(uploaded_gia_dvkt.getvalue())
-            st.success(f"✅ Đã tải {len(DANH_MUC['gia_dvkt'])} mã giá DVKT")
+            DANH_MUC_BO_SUNG["gia_dvkt"] = load_gia_danh_muc(uploaded_gia_dvkt.getvalue())
+            st.success(f"✅ Bổ sung {len(DANH_MUC_BO_SUNG['gia_dvkt'])} mã giá DVKT")
         if uploaded_icd_chidinh:
-            DANH_MUC["icd_chi_dinh"] = load_icd_chi_dinh(uploaded_icd_chidinh.getvalue())
-            st.success(f"✅ Đã tải bảng đối chiếu ICD-10 ↔ chỉ định ({len(DANH_MUC['icd_chi_dinh'])} mã bệnh)")
+            DANH_MUC_BO_SUNG["icd_chi_dinh"] = load_icd_chi_dinh(uploaded_icd_chidinh.getvalue())
+            st.success(f"✅ Đã tải bảng đối chiếu ICD-10 ↔ chỉ định ({len(DANH_MUC_BO_SUNG['icd_chi_dinh'])} mã bệnh)")
+
+        DANH_MUC = merge_danh_muc(DANH_MUC_MAC_DINH, DANH_MUC_BO_SUNG)
 
     # ====================== UPLOAD FILES ======================
     st.subheader("📤 Chọn 5 file cần kiểm tra (XML1 - XML5 theo chuẩn 4210)")
