@@ -36,11 +36,11 @@ MANDATORY_FIELDS_PER_FILE = {
     ],
     "Thuốc": [
         'MA_LK', 'MA_THUOC', 'TEN_THUOC', 'SO_LUONG', 'DON_GIA',
-        'THANH_TIEN_BH', 'NGAY_YL', 'NGAY_TH_YL',
+        'THANH_TIEN_BH', 'NGAY_YL', 'NGAY_TH_YL'
     ],
     "Dịch vụ kỹ thuật": [
         'MA_LK', 'MA_DICH_VU', 'TEN_DICH_VU', 'SO_LUONG', 'DON_GIA_BH',
-        'THANH_TIEN_BH', 'NGAY_YL', 'NGAY_TH_YL', 'NGAY_KQ'
+        'THANH_TIEN_BH', 'NGAY_YL'
     ],
     "Mã máy xét nghiệm": ['MA_LK', 'MA_DICH_VU', 'TEN_CHI_SO', 'NGAY_KQ'],
     "Phẫu thuật thủ thuật": ['MA_LK', 'THOI_DIEM_DBLS']
