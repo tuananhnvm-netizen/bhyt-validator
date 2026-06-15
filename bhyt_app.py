@@ -18,8 +18,8 @@ from bhyt_rules import (
     _to_datetime,
     load_default_danh_muc,
     merge_danh_muc,
-    rebuild_danh_muc_gia_thuoc_from_source,
-    rebuild_danh_muc_gia_dvkt_from_source,
+    rebuild_gia_thuoc_from_source,
+    rebuild_gia_dvkt_from_source,
 )
 
 st.set_page_config(page_title="Kiểm tra XML BHYT", layout="wide")
