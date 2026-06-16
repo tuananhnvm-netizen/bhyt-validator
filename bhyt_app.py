@@ -3,6 +3,8 @@ import streamlit.components.v1 as components
 import pandas as pd
 from datetime import datetime
 import os
+import sys
+import importlib
 import xml.etree.ElementTree as ET
 import re
 from openpyxl import load_workbook, Workbook
@@ -10,17 +12,47 @@ from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 from io import BytesIO
 
-from excel_compare import render_excel_compare_tab
-from bhyt_rules import (
-    check_hanh_chinh_full,
-    check_nhom2_danh_muc_gia,
-    check_nhom3_hop_ly_chi_dinh,
-    _to_datetime,
-    load_default_danh_muc,
-    merge_danh_muc,
-    rebuild_ma_thuoc_hoatchat_from_source,
-    rebuild_gia_dvkt_from_source,
-)
+# Import excel_compare
+try:
+    from excel_compare import render_excel_compare_tab
+except ImportError as e:
+    def render_excel_compare_tab():
+        st.error(f"Không tải được excel_compare: {e}")
+
+# Import bhyt_rules - từng hàm riêng để dễ phát hiện lỗi
+try:
+    import bhyt_rules as _br
+    # Buộc reload để tránh cache module cũ trên Streamlit Cloud
+    importlib.reload(_br)
+
+    check_hanh_chinh_full            = _br.check_hanh_chinh_full
+    check_nhom2_danh_muc_gia         = _br.check_nhom2_danh_muc_gia
+    check_nhom3_hop_ly_chi_dinh      = _br.check_nhom3_hop_ly_chi_dinh
+    _to_datetime                     = _br._to_datetime
+    load_default_danh_muc            = _br.load_default_danh_muc
+    merge_danh_muc                   = _br.merge_danh_muc
+    rebuild_ma_thuoc_hoatchat_from_source = _br.rebuild_ma_thuoc_hoatchat_from_source
+    rebuild_gia_dvkt_from_source     = _br.rebuild_gia_dvkt_from_source
+
+    # Kiểm tra tất cả hàm tồn tại
+    _MISSING = [name for name in [
+        "check_hanh_chinh_full", "check_nhom2_danh_muc_gia",
+        "check_nhom3_hop_ly_chi_dinh", "_to_datetime",
+        "load_default_danh_muc", "merge_danh_muc",
+        "rebuild_ma_thuoc_hoatchat_from_source", "rebuild_gia_dvkt_from_source"
+    ] if not hasattr(_br, name)]
+    if _MISSING:
+        st.error(
+            f"❌ bhyt_rules.py thiếu các hàm sau (cần upload lại file mới): "
+            + ", ".join(_MISSING)
+        )
+        st.stop()
+
+except Exception as _e:
+    st.error(f"❌ Lỗi khi tải bhyt_rules.py: {_e}")
+    st.info("Vui lòng đảm bảo đã upload đúng file bhyt_rules.py mới nhất lên GitHub.")
+    st.stop()
+
 
 st.set_page_config(page_title="Kiểm tra XML BHYT", layout="wide")
 
