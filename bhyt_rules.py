@@ -33,14 +33,13 @@ except ImportError:  # pragma: no cover
 
 # =====================================================================
 #  DANH MỤC CỐ ĐỊNH ĐI KÈM ỨNG DỤNG (không cần tải lên mỗi lần kiểm tra)
-#  Đặt 3 file Excel này CÙNG THƯ MỤC với bhyt_app.py / bhyt_rules.py:
-#    - danh_muc_gia_dvkt.xlsx          (cột: MA, GIA)
-#    - danh_muc_gia_thuoc.xlsx         (cột: MA, GIA)
-#    - danh_muc_thuoc_chongchidinh.xlsx (cột: HOAT_CHAT_KEYWORD, ICD_CHONGCHIDINH, GHI_CHU)
+#  Đặt các file Excel này CÙNG THƯ MỤC với bhyt_app.py / bhyt_rules.py:
+#    - danh_muc_gia_dvkt.xlsx              (cột: MA, GIA)
+#    - danh_muc_ma_thuoc_hoatchat.xlsx     (cột: MA_THUOC, TEN_THUOC, TEN_HOAT_CHAT)
+#    - danh_muc_thuoc_chongchidinh.xlsx    (cột: HOAT_CHAT_KEYWORD, ICD_CHONGCHIDINH, GHI_CHU)
 # =====================================================================
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_GIA_DVKT_FILE = os.path.join(_BASE_DIR, "danh_muc_gia_dvkt.xlsx")
-DEFAULT_GIA_THUOC_FILE = os.path.join(_BASE_DIR, "danh_muc_gia_thuoc.xlsx")
 DEFAULT_THUOC_CHONGCHIDINH_FILE = os.path.join(_BASE_DIR, "danh_muc_thuoc_chongchidinh.xlsx")
 DEFAULT_MA_THUOC_HOATCHAT_FILE = os.path.join(_BASE_DIR, "danh_muc_ma_thuoc_hoatchat.xlsx")
 
@@ -221,15 +220,17 @@ def _load_ma_thuoc_hoatchat_excel(path):
 def load_default_danh_muc():
     """
     Nạp các danh mục cố định kèm sẵn ứng dụng (đặt cùng thư mục với bhyt_rules.py):
-      - gia_dvkt, gia_thuoc: dict {MA: GIA}
+      - gia_dvkt: dict {MA: GIA}
       - thuoc_chong_chi_dinh: list[{keyword, icd_prefixes, ghi_chu}]
       - ma_thuoc_hoat_chat: dict {MA_THUOC: ten_hoat_chat (lowercase)}
     Trả về dict có thể truyền trực tiếp vào tham số `danh_muc` của các hàm check_*.
     Nếu file không tồn tại, trả về dict rỗng/{} cho mục đó (không lỗi).
+
+    LƯU Ý: không còn nạp danh mục giá thuốc (gia_thuoc) - theo yêu cầu, việc
+    kiểm tra thuốc chỉ tập trung vào tương tác/chống chỉ định theo ICD-10.
     """
     return {
         "gia_dvkt": _load_gia_excel(DEFAULT_GIA_DVKT_FILE),
-        "gia_thuoc": _load_gia_excel(DEFAULT_GIA_THUOC_FILE),
         "thuoc_chong_chi_dinh": _load_thuoc_chongchidinh_excel(DEFAULT_THUOC_CHONGCHIDINH_FILE),
         "ma_thuoc_hoat_chat": _load_ma_thuoc_hoatchat_excel(DEFAULT_MA_THUOC_HOATCHAT_FILE),
     }
@@ -450,74 +451,23 @@ def check_nhom1_hanh_chinh(ho_so, ma_lk, danh_muc=None):
 def check_nhom2_danh_muc_gia(ho_so, ma_lk, file_type, danh_muc=None):
     """
     danh_muc (optional, do người dùng tải lên) có thể chứa:
-      danh_muc['gia_thuoc']   : dict {MA_THUOC: gia_duyet}
       danh_muc['gia_dvkt']    : dict {MA_DICH_VU: gia_duyet}
       danh_muc['gia_vtyt']    : dict {MA_VTYT: gia_duyet}
       danh_muc['dinh_muc']    : dict {MA_DICH_VU: {MA_VTYT: so_luong_toi_da}}
-    Nếu không có danh mục, chỉ kiểm tra các quy tắc logic nội bộ
-    (đơn giá x số lượng = thành tiền, thành tiền BH <= thành tiền, ...).
+
+    LƯU Ý: Theo yêu cầu, KHÔNG kiểm tra giá/đơn giá thuốc (file "Thuốc") trong
+    nhóm này nữa - việc kiểm tra thuốc chỉ còn tập trung vào tương tác/chống
+    chỉ định theo ICD-10 (xem nhóm 3 - mục 3.5).
+    Nếu không có danh mục giá DVKT, chỉ kiểm tra các quy tắc logic nội bộ
+    (đơn giá x số lượng = thành tiền, thành tiền BH <= thành tiền, ...) cho DVKT.
     """
     errors = []
     danh_muc = danh_muc or {}
 
     if file_type == "Thuốc":
-        nguon = "XML2 - Thuốc"
-        ma_thuoc = _text(ho_so, "MA_THUOC")
-        ten_thuoc = _text(ho_so, "TEN_THUOC")
-        so_luong = _to_float(_text(ho_so, "SO_LUONG"))
-        don_gia = _to_float(_text(ho_so, "DON_GIA"))
-        thanh_tien_bh = _to_float(_text(ho_so, "THANH_TIEN_BH"))
-        thanh_tien_bn_tt = _to_float(_text(ho_so, "T_TONGCHI"))
-
-        # 2.1 Đối chiếu giá trúng thầu/giá duyệt
-        gia_thuoc_dm = danh_muc.get("gia_thuoc", {})
-        if gia_thuoc_dm:
-            if ma_thuoc and ma_thuoc not in gia_thuoc_dm:
-                errors.append(_err(
-                    ma_lk, "2. Danh mục - Giá - Định mức", "Lỗi",
-                    "MA_THUOC", ma_thuoc,
-                    f"Mã thuốc '{ma_thuoc}' ({ten_thuoc}) không có trong danh mục thuốc đã trúng thầu/"
-                    "được phê duyệt sử dụng tại cơ sở.",
-                    "Kiểm tra lại mã thuốc theo danh mục trúng thầu hiện hành tại cơ sở, "
-                    "hoặc bổ sung thuốc vào danh mục nếu đã có quyết định phê duyệt bổ sung.", nguon
-                ))
-            elif ma_thuoc and don_gia is not None:
-                gia_duyet = gia_thuoc_dm.get(ma_thuoc)
-                if gia_duyet is not None and abs(don_gia - gia_duyet) > 0.5:
-                    errors.append(_err(
-                        ma_lk, "2. Danh mục - Giá - Định mức", "Lỗi",
-                        "DON_GIA", don_gia,
-                        f"Đơn giá thuốc '{ma_thuoc}' ({ten_thuoc}) = {don_gia:,.0f} không khớp giá "
-                        f"trúng thầu được duyệt = {gia_duyet:,.0f}.",
-                        "Sửa lại DON_GIA theo đúng giá trúng thầu/giá duyệt hiện hành tại cơ sở.", nguon
-                    ))
-
-        # 2.2 Kiểm tra logic số học: đơn giá x số lượng (cho phép sai số làm tròn)
-        if so_luong is not None and don_gia is not None and thanh_tien_bh is not None:
-            tinh_lai = round(so_luong * don_gia, 0)
-            if abs(tinh_lai - round(thanh_tien_bh + (thanh_tien_bn_tt or 0) -
-                                     (thanh_tien_bn_tt or 0), 0)) > max(1, 0.01 * tinh_lai) \
-               and thanh_tien_bn_tt is None:
-                # Khi không có cột tổng chi để đối chiếu phần BN tự trả,
-                # chỉ kiểm tra thành tiền BH không vượt SL*đơn giá
-                pass
-            if thanh_tien_bh is not None and tinh_lai is not None and thanh_tien_bh - tinh_lai > max(1, 0.01 * tinh_lai):
-                errors.append(_err(
-                    ma_lk, "2. Danh mục - Giá - Định mức", "Lỗi",
-                    "THANH_TIEN_BH", thanh_tien_bh,
-                    f"Thành tiền BHYT ({thanh_tien_bh:,.0f}) lớn hơn Số lượng x Đơn giá "
-                    f"({so_luong:g} x {don_gia:,.0f} = {tinh_lai:,.0f}).",
-                    "Kiểm tra lại công thức tính thành tiền BHYT, đảm bảo "
-                    "Thành tiền BH <= Số lượng x Đơn giá.", nguon
-                ))
-
-        if so_luong is not None and so_luong <= 0:
-            errors.append(_err(
-                ma_lk, "2. Danh mục - Giá - Định mức", "Lỗi",
-                "SO_LUONG", so_luong,
-                "Số lượng thuốc phải lớn hơn 0.",
-                "Kiểm tra lại số lượng thuốc đã cấp/sử dụng cho người bệnh.", nguon
-            ))
+        # Không kiểm tra giá/đơn giá/thành tiền của thuốc nữa.
+        # Việc kiểm tra thuốc tập trung ở Nhóm 3 - mục 3.5 (tương tác/chống chỉ định theo ICD-10).
+        return errors
 
     elif file_type == "Dịch vụ kỹ thuật":
         nguon = "XML3 - DVKT"
@@ -820,6 +770,64 @@ def check_nhom3_hop_ly_chi_dinh(ho_so_hc, file_type, items_by_malk, ma_lk, danh_
                     if canh_bao_added:
                         break
 
+    # ---- 3.6 Đối chiếu chéo DVKT (XML3) <-> Mã máy/Kết quả CĐHA-TDCN (XML4) ----
+    ds_dvkt = data.get("dvkt", [])
+    ds_cdha = data.get("cdha", [])
+    ma_dvkt_set = {item.get("MA_DICH_VU") for item in ds_dvkt if item.get("MA_DICH_VU")}
+
+    for item in ds_cdha:
+        ma_dv_cdha = item.get("MA_DICH_VU", "")
+        ten_dv_cdha = item.get("TEN_DICH_VU", "")
+        ten_chi_so = item.get("TEN_CHI_SO", "")
+        ma_may = item.get("MA_MAY", "")
+        ngay_kq = item.get("NGAY_KQ", "")
+        ngay_yl_cdha = item.get("NGAY_YL", "")
+
+        # 3.6.a: Mã DVKT trong kết quả CĐHA/TDCN phải có chỉ định tương ứng ở XML3 (cùng MA_LK)
+        if ma_dv_cdha and ma_dvkt_set and ma_dv_cdha not in ma_dvkt_set:
+            errors.append(_err(
+                ma_lk, "3. Hợp lý chỉ định y khoa", "Cảnh báo",
+                "MA_DICH_VU", ma_dv_cdha,
+                f"Kết quả CĐHA/TDCN (XML4) có mã DVKT '{ma_dv_cdha}' ({ten_dv_cdha}) nhưng không tìm "
+                f"thấy chỉ định/thực hiện dịch vụ này trong Dịch vụ kỹ thuật (XML3) của cùng hồ sơ.",
+                "Kiểm tra lại mã DVKT giữa XML3 và XML4 cho khớp nhau; nếu dịch vụ đã thực hiện thì "
+                "phải có dòng tương ứng trong XML3 (Dịch vụ kỹ thuật), nếu không thì xoá dòng kết quả "
+                "thừa trong XML4.", nguon
+            ))
+
+        # 3.6.b: Có kết quả (TEN_CHI_SO hoặc NGAY_KQ) nhưng thiếu mã máy thực hiện
+        if (ten_chi_so or ngay_kq) and not ma_may:
+            errors.append(_err(
+                ma_lk, "3. Hợp lý chỉ định y khoa", "Cảnh báo",
+                "MA_MAY", "(thiếu)",
+                f"Dòng kết quả '{ten_dv_cdha or ma_dv_cdha}' ({ten_chi_so or 'có ngày kết quả'}) "
+                "chưa khai mã máy thực hiện (MA_MAY).",
+                "Bổ sung MA_MAY (mã máy/thiết bị thực hiện DVKT) theo danh mục máy đã đăng ký với cơ sở "
+                "để tránh bị nghi vấn khi giám định.", nguon
+            ))
+
+        # 3.6.c: Ngày có kết quả (NGAY_KQ) phải sau hoặc bằng ngày chỉ định (NGAY_YL) của DVKT tương ứng
+        dt_kq = _to_datetime(ngay_kq) if ngay_kq else None
+        if dt_kq:
+            ngay_yl_dvkt = None
+            for dv in ds_dvkt:
+                if dv.get("MA_DICH_VU") == ma_dv_cdha and dv.get("NGAY_YL"):
+                    ngay_yl_dvkt = dv.get("NGAY_YL")
+                    break
+            if not ngay_yl_dvkt:
+                ngay_yl_dvkt = ngay_yl_cdha
+
+            dt_yl = _to_datetime(ngay_yl_dvkt) if ngay_yl_dvkt else None
+            if dt_yl and dt_kq < dt_yl:
+                errors.append(_err(
+                    ma_lk, "3. Hợp lý chỉ định y khoa", "Lỗi",
+                    "NGAY_KQ", ngay_kq,
+                    f"Ngày có kết quả ({ngay_kq}) của '{ten_dv_cdha or ma_dv_cdha}' "
+                    f"({ten_chi_so}) trước ngày chỉ định thực hiện ({ngay_yl_dvkt}) - không hợp lý.",
+                    "Kiểm tra lại NGAY_YL (ngày chỉ định/thực hiện) và NGAY_KQ (ngày có kết quả), "
+                    "đảm bảo NGAY_KQ >= NGAY_YL.", nguon
+                ))
+
     return errors
 
 
@@ -940,31 +948,31 @@ def _save_gia_excel(data_dict, path):
     wb.save(path)
 
 
-def rebuild_gia_thuoc_from_source(file_bytes_or_path):
+def rebuild_ma_thuoc_hoatchat_from_source(file_bytes_or_path):
     """
     Nhận file Excel danh mục thuốc GỐC (cấu trúc như FileDanhMucThuoc.xlsx, có
-    các cột MA_THUOC, TEN_THUOC, TEN_HOAT_CHAT, DON_GIA_BH, và tùy chọn TU_NGAY
-    để lấy bản ghi mới nhất cho mỗi mã thuốc).
+    các cột MA_THUOC, TEN_THUOC, TEN_HOAT_CHAT, và tùy chọn TU_NGAY để lấy bản
+    ghi mới nhất cho mỗi mã thuốc).
 
-    Tự động:
-      - Lọc ra danh mục giá thuốc (MA_THUOC, DON_GIA_BH) -> ghi đè
-        danh_muc_gia_thuoc.xlsx
-      - Lọc ra bảng tra MA_THUOC -> TEN_HOAT_CHAT -> ghi đè
-        danh_muc_ma_thuoc_hoatchat.xlsx
+    Tự động lọc ra bảng tra MA_THUOC -> TEN_HOAT_CHAT -> ghi đè
+    danh_muc_ma_thuoc_hoatchat.xlsx (dùng cho quy tắc 3.5 - tương tác/chống chỉ
+    định thuốc theo ICD-10).
 
-    Trả về dict {"so_ma_gia_thuoc": int, "so_ma_hoat_chat": int} để hiển thị
-    cho người dùng. Raise Exception nếu file không đúng cấu trúc tối thiểu.
+    Không còn xử lý giá thuốc (DON_GIA_BH) - việc kiểm tra giá thuốc đã được bỏ.
+
+    Trả về dict {"so_ma_hoat_chat": int}. Raise Exception nếu file không đúng
+    cấu trúc tối thiểu.
     """
     wb = load_workbook(file_bytes_or_path, data_only=True)
     sheet = wb.active
     headers = [str(c.value).strip().upper() if c.value else "" for c in sheet[1]]
 
-    required = ["MA_THUOC", "TEN_THUOC", "TEN_HOAT_CHAT", "DON_GIA_BH"]
+    required = ["MA_THUOC", "TEN_THUOC", "TEN_HOAT_CHAT"]
     missing = [c for c in required if c not in headers]
     if missing:
         raise ValueError(
             "File danh mục thuốc thiếu các cột bắt buộc: " + ", ".join(missing) +
-            ". Cần có đủ các cột: MA_THUOC, TEN_THUOC, TEN_HOAT_CHAT, DON_GIA_BH "
+            ". Cần có đủ các cột: MA_THUOC, TEN_THUOC, TEN_HOAT_CHAT "
             "(và TU_NGAY nếu muốn lấy bản ghi mới nhất khi 1 mã có nhiều dòng)."
         )
 
@@ -972,11 +980,10 @@ def rebuild_gia_thuoc_from_source(file_bytes_or_path):
     idx_ma = idx["MA_THUOC"]
     idx_ten = idx["TEN_THUOC"]
     idx_hc = idx["TEN_HOAT_CHAT"]
-    idx_gia = idx["DON_GIA_BH"]
     idx_tungay = idx.get("TU_NGAY")
 
     # Gom theo MA_THUOC, nếu có TU_NGAY thì giữ bản ghi có TU_NGAY lớn nhất (mới nhất)
-    records = {}  # ma_thuoc -> (tu_ngay_sortkey, ten_thuoc, hoat_chat, gia)
+    records = {}  # ma_thuoc -> (tu_ngay_sortkey, ten_thuoc, hoat_chat)
     for r in range(2, sheet.max_row + 1):
         ma = sheet.cell(r, idx_ma + 1).value
         if ma is None or str(ma).strip() == "":
@@ -984,11 +991,6 @@ def rebuild_gia_thuoc_from_source(file_bytes_or_path):
         ma = str(ma).strip()
         ten = sheet.cell(r, idx_ten + 1).value
         hc = sheet.cell(r, idx_hc + 1).value
-        gia = sheet.cell(r, idx_gia + 1).value
-        try:
-            gia_f = float(gia)
-        except (TypeError, ValueError):
-            gia_f = None
 
         sort_key = ""
         if idx_tungay is not None:
@@ -998,12 +1000,7 @@ def rebuild_gia_thuoc_from_source(file_bytes_or_path):
         prev = records.get(ma)
         if prev is None or sort_key >= prev[0]:
             records[ma] = (sort_key, str(ten).strip() if ten else "",
-                            str(hc).strip() if hc else "", gia_f)
-
-    gia_thuoc = {ma: rec[3] for ma, rec in records.items() if rec[3] is not None}
-    ma_thuoc_hoat_chat = {ma: rec[2].lower() for ma, rec in records.items()}
-
-    _save_gia_excel(gia_thuoc, DEFAULT_GIA_THUOC_FILE)
+                            str(hc).strip() if hc else "")
 
     from openpyxl import Workbook
     wb_out = Workbook()
@@ -1013,7 +1010,7 @@ def rebuild_gia_thuoc_from_source(file_bytes_or_path):
         ws_out.append([ma, rec[1], rec[2]])
     wb_out.save(DEFAULT_MA_THUOC_HOATCHAT_FILE)
 
-    return {"so_ma_gia_thuoc": len(gia_thuoc), "so_ma_hoat_chat": len(ma_thuoc_hoat_chat)}
+    return {"so_ma_hoat_chat": len(records)}
 
 
 def rebuild_gia_dvkt_from_source(file_bytes_or_path):
