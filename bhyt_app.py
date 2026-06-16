@@ -508,10 +508,11 @@ with tab1:
             "LIEU_DUNG", "DUONG_DUNG", "NGAY_YL"
         ])
         collect_items("Dịch vụ kỹ thuật", "dvkt", [
-            "MA_DICH_VU", "TEN_DICH_VU", "SO_LUONG", "DON_GIA_BH", "THANH_TIEN_BH", "NGAY_YL"
+            "MA_DICH_VU", "TEN_DICH_VU", "SO_LUONG", "DON_GIA_BH",
+            "THANH_TIEN_BH", "NGAY_YL", "MA_MAY"
         ])
         collect_items("Mã máy xét nghiệm", "cdha", [
-            "MA_DICH_VU", "TEN_DICH_VU", "TEN_CHI_SO", "MA_MAY", "NGAY_KQ", "NGAY_YL"
+            "MA_DICH_VU", "TEN_DICH_VU", "TEN_CHI_SO", "NGAY_KQ", "NGAY_YL"
         ])
 
         # -------- Bước 3: chạy validation cho từng file/hồ sơ --------

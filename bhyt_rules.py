@@ -770,43 +770,59 @@ def check_nhom3_hop_ly_chi_dinh(ho_so_hc, file_type, items_by_malk, ma_lk, danh_
                     if canh_bao_added:
                         break
 
-    # ---- 3.6 Đối chiếu chéo DVKT (XML3) <-> Mã máy/Kết quả CĐHA-TDCN (XML4) ----
+    # ---- 3.6 Đối chiếu chéo DVKT (XML3) <-> Kết quả CĐHA-TDCN (XML4) ----
     ds_dvkt = data.get("dvkt", [])
     ds_cdha = data.get("cdha", [])
     ma_dvkt_set = {item.get("MA_DICH_VU") for item in ds_dvkt if item.get("MA_DICH_VU")}
 
+    # Từ khóa nhận diện DVKT là xét nghiệm/CĐHA/TDCN cần có mã máy (MA_MAY ở XML3)
+    DVKT_CAN_MA_MAY = [
+        "XÉT NGHIỆM", "XET NGHIEM", "SIÊU ÂM", "SIEU AM",
+        "X-QUANG", "XQUANG", "X QUANG", "CT ", "MRI",
+        "CỘNG HƯỞNG TỪ", "CONG HUONG TU", "NỘI SOI", "NOI SOI",
+        "ĐIỆN TIM", "DIEN TIM", "ĐIỆN NÃO", "DIEN NAO",
+        "TDCN", "THĂM DÒ", "THAM DO", "ĐO CHỨC NĂNG", "DO CHUC NANG",
+    ]
+
+    # 3.6.a: MA_MAY ở XML3 - DVKT là xét nghiệm/CĐHA mà thiếu mã máy
+    for dv in ds_dvkt:
+        ma_dv = dv.get("MA_DICH_VU", "")
+        ten_dv = (dv.get("TEN_DICH_VU") or "").upper()
+        ma_may = (dv.get("MA_MAY") or "").strip()
+
+        # Chỉ kiểm tra khi DVKT có dấu hiệu là xét nghiệm/CĐHA
+        la_xet_nghiem = any(k in ten_dv for k in DVKT_CAN_MA_MAY)
+        if la_xet_nghiem and not ma_may:
+            errors.append(_err(
+                ma_lk, "3. Hợp lý chỉ định y khoa", "Cảnh báo",
+                "MA_MAY", "(thiếu)",
+                f"DVKT '{ma_dv}' ({dv.get('TEN_DICH_VU', '')}) là xét nghiệm/CĐHA/TDCN "
+                "nhưng chưa khai mã máy thực hiện (MA_MAY) trong XML3.",
+                "Bổ sung MA_MAY (mã máy/thiết bị thực hiện) vào XML3 theo danh mục máy "
+                "đã đăng ký với BHXH để tránh bị nghi vấn khi giám định.", nguon
+            ))
+
+    # 3.6.b: Mã DVKT trong kết quả XML4 phải có chỉ định tương ứng ở XML3
     for item in ds_cdha:
         ma_dv_cdha = item.get("MA_DICH_VU", "")
         ten_dv_cdha = item.get("TEN_DICH_VU", "")
         ten_chi_so = item.get("TEN_CHI_SO", "")
-        ma_may = item.get("MA_MAY", "")
         ngay_kq = item.get("NGAY_KQ", "")
         ngay_yl_cdha = item.get("NGAY_YL", "")
 
-        # 3.6.a: Mã DVKT trong kết quả CĐHA/TDCN phải có chỉ định tương ứng ở XML3 (cùng MA_LK)
         if ma_dv_cdha and ma_dvkt_set and ma_dv_cdha not in ma_dvkt_set:
             errors.append(_err(
                 ma_lk, "3. Hợp lý chỉ định y khoa", "Cảnh báo",
                 "MA_DICH_VU", ma_dv_cdha,
-                f"Kết quả CĐHA/TDCN (XML4) có mã DVKT '{ma_dv_cdha}' ({ten_dv_cdha}) nhưng không tìm "
-                f"thấy chỉ định/thực hiện dịch vụ này trong Dịch vụ kỹ thuật (XML3) của cùng hồ sơ.",
-                "Kiểm tra lại mã DVKT giữa XML3 và XML4 cho khớp nhau; nếu dịch vụ đã thực hiện thì "
-                "phải có dòng tương ứng trong XML3 (Dịch vụ kỹ thuật), nếu không thì xoá dòng kết quả "
-                "thừa trong XML4.", nguon
+                f"Kết quả CĐHA/TDCN (XML4) có mã DVKT '{ma_dv_cdha}' ({ten_dv_cdha}) "
+                "nhưng không tìm thấy chỉ định tương ứng trong XML3 (Dịch vụ kỹ thuật) "
+                "của cùng hồ sơ.",
+                "Kiểm tra mã DVKT giữa XML3 và XML4 phải khớp nhau; nếu dịch vụ đã thực "
+                "hiện thì phải có dòng tương ứng trong XML3, nếu không thì xoá dòng kết "
+                "quả thừa trong XML4.", nguon
             ))
 
-        # 3.6.b: Có kết quả (TEN_CHI_SO hoặc NGAY_KQ) nhưng thiếu mã máy thực hiện
-        if (ten_chi_so or ngay_kq) and not ma_may:
-            errors.append(_err(
-                ma_lk, "3. Hợp lý chỉ định y khoa", "Cảnh báo",
-                "MA_MAY", "(thiếu)",
-                f"Dòng kết quả '{ten_dv_cdha or ma_dv_cdha}' ({ten_chi_so or 'có ngày kết quả'}) "
-                "chưa khai mã máy thực hiện (MA_MAY).",
-                "Bổ sung MA_MAY (mã máy/thiết bị thực hiện DVKT) theo danh mục máy đã đăng ký với cơ sở "
-                "để tránh bị nghi vấn khi giám định.", nguon
-            ))
-
-        # 3.6.c: Ngày có kết quả (NGAY_KQ) phải sau hoặc bằng ngày chỉ định (NGAY_YL) của DVKT tương ứng
+        # 3.6.c: Ngày kết quả (NGAY_KQ) phải >= ngày chỉ định (NGAY_YL) tương ứng ở XML3
         dt_kq = _to_datetime(ngay_kq) if ngay_kq else None
         if dt_kq:
             ngay_yl_dvkt = None
@@ -823,9 +839,10 @@ def check_nhom3_hop_ly_chi_dinh(ho_so_hc, file_type, items_by_malk, ma_lk, danh_
                     ma_lk, "3. Hợp lý chỉ định y khoa", "Lỗi",
                     "NGAY_KQ", ngay_kq,
                     f"Ngày có kết quả ({ngay_kq}) của '{ten_dv_cdha or ma_dv_cdha}' "
-                    f"({ten_chi_so}) trước ngày chỉ định thực hiện ({ngay_yl_dvkt}) - không hợp lý.",
-                    "Kiểm tra lại NGAY_YL (ngày chỉ định/thực hiện) và NGAY_KQ (ngày có kết quả), "
-                    "đảm bảo NGAY_KQ >= NGAY_YL.", nguon
+                    f"({ten_chi_so}) trước ngày chỉ định thực hiện ({ngay_yl_dvkt}) - "
+                    "không hợp lý.",
+                    "Kiểm tra lại NGAY_YL (ngày chỉ định/thực hiện ở XML3) và NGAY_KQ "
+                    "(ngày có kết quả ở XML4), đảm bảo NGAY_KQ >= NGAY_YL.", nguon
                 ))
 
     return errors
