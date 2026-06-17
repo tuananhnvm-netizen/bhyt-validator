@@ -33,13 +33,15 @@ try:
     merge_danh_muc                   = _br.merge_danh_muc
     rebuild_ma_thuoc_hoatchat_from_source = _br.rebuild_ma_thuoc_hoatchat_from_source
     rebuild_gia_dvkt_from_source     = _br.rebuild_gia_dvkt_from_source
+    rebuild_nhan_vien_yte_from_source = _br.rebuild_nhan_vien_yte_from_source
 
     # Kiểm tra tất cả hàm tồn tại
     _MISSING = [name for name in [
         "check_hanh_chinh_full", "check_nhom2_danh_muc_gia",
         "check_nhom3_hop_ly_chi_dinh", "_to_datetime",
         "load_default_danh_muc", "merge_danh_muc",
-        "rebuild_ma_thuoc_hoatchat_from_source", "rebuild_gia_dvkt_from_source"
+        "rebuild_ma_thuoc_hoatchat_from_source", "rebuild_gia_dvkt_from_source",
+        "rebuild_nhan_vien_yte_from_source"
     ] if not hasattr(_br, name)]
     if _MISSING:
         st.error(
@@ -234,6 +236,20 @@ with tab1:
             except Exception as e:
                 st.error(f"❌ Không thể cập nhật danh mục DVKT: {e}")
 
+        uploaded_file_nv_goc = st.file_uploader(
+            "📄 File danh mục nhân viên y tế gốc (như FileNhanVienYTe.xlsx - cần cột "
+            "MACCHN, HO_TEN, CHUCDANH_NN; tùy chọn DVKT_KHAC, VB_PHANCONG) - dùng để "
+            "kiểm tra chứng chỉ hành nghề người kê đơn/thực hiện DVKT/PTTT",
+            type=["xlsx"], key="file_nv_goc")
+        if uploaded_file_nv_goc:
+            try:
+                from io import BytesIO as _BytesIO
+                ket_qua = rebuild_nhan_vien_yte_from_source(_BytesIO(uploaded_file_nv_goc.getvalue()))
+                st.success(f"✅ Đã cập nhật danh mục nhân viên y tế ({ket_qua['so_nhan_vien']} người) từ file vừa tải lên.")
+                st.cache_data.clear()
+            except Exception as e:
+                st.error(f"❌ Không thể cập nhật danh mục nhân viên y tế: {e}")
+
         st.markdown("---")
         st.caption(
             "✅ Đã tích hợp sẵn danh mục giá DVKT/Giường bệnh và bảng thuốc chống chỉ định "
@@ -245,12 +261,13 @@ with tab1:
         uploaded_icd_chidinh = st.file_uploader(
             "3. (Tùy chọn) Bảng đối chiếu ICD-10 ↔ chỉ định (cột MA_BENH, MA_DICH_VU)", type=["xlsx"], key="icd_chidinh")
 
-        # Danh mục cố định kèm sẵn ứng dụng (giá DVKT/Giường, thuốc chống chỉ định theo ICD)
+        # Danh mục cố định kèm sẵn ứng dụng (giá DVKT/Giường, thuốc chống chỉ định theo ICD, nhân viên y tế)
         DANH_MUC_MAC_DINH = load_default_danh_muc()
         st.success(
             f"📦 Danh mục mặc định: {len(DANH_MUC_MAC_DINH.get('gia_dvkt', {}))} mã giá DVKT/Giường, "
             f"{len(DANH_MUC_MAC_DINH.get('thuoc_chong_chi_dinh', []))} quy tắc thuốc chống chỉ định ICD-10, "
-            f"{len(DANH_MUC_MAC_DINH.get('ma_thuoc_hoat_chat', {}))} mã thuốc có dữ liệu hoạt chất."
+            f"{len(DANH_MUC_MAC_DINH.get('ma_thuoc_hoat_chat', {}))} mã thuốc có dữ liệu hoạt chất, "
+            f"{len(DANH_MUC_MAC_DINH.get('nhan_vien_yte', {}))} nhân viên y tế."
         )
 
         DANH_MUC_BO_SUNG = {}
@@ -398,15 +415,15 @@ with tab1:
                     'huong_xu_ly': "Sửa lại NGAY_VAO/NGAY_RA đúng định dạng năm-tháng-ngày-giờ-phút (12 số liên tiếp).",
                     'nguon_file': file_type
                 })
-            elif dt_r < dt_v:
+            elif dt_r <= dt_v:
                 errors.append({
                     'ma_lk': ma_lk,
                     'nhom': "0. Trường bắt buộc",
                     'muc_do': "Lỗi",
                     'truong_loi': 'NGAY_RA',
                     'gia_tri': r,
-                    'mo_ta_loi': f"Ngày ra ({r}) không thể nhỏ hơn Ngày vào ({v}).",
-                    'huong_xu_ly': "Kiểm tra lại NGAY_VAO và NGAY_RA, đảm bảo Ngày ra >= Ngày vào.",
+                    'mo_ta_loi': f"Ngày ra ({r}) phải lớn hơn Ngày vào ({v}) - không được nhỏ hơn hoặc bằng.",
+                    'huong_xu_ly': "Kiểm tra lại NGAY_VAO và NGAY_RA, đảm bảo Ngày ra > Ngày vào.",
                     'nguon_file': file_type
                 })
         return errors
@@ -512,7 +529,11 @@ with tab1:
             "THANH_TIEN_BH", "NGAY_YL", "MA_MAY"
         ])
         collect_items("Mã máy xét nghiệm", "cdha", [
-            "MA_DICH_VU", "TEN_DICH_VU", "TEN_CHI_SO", "NGAY_KQ", "NGAY_YL"
+            "MA_DICH_VU", "TEN_DICH_VU", "TEN_CHI_SO", "GIA_TRI", "MO_TA", "KET_LUAN",
+            "MA_BS_DOC_KQ", "NGAY_YL", "NGAY_TH_YL", "NGAY_KQ"
+        ])
+        collect_items("Phẫu thuật thủ thuật", "pttt", [
+            "MA_PTTT", "TEN_PTTT", "THOI_DIEM_DBLS", "NGUOI_THUC_HIEN"
         ])
 
         # -------- Bước 3: chạy validation cho từng file/hồ sơ --------

@@ -42,6 +42,25 @@ _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_GIA_DVKT_FILE = os.path.join(_BASE_DIR, "danh_muc_gia_dvkt.xlsx")
 DEFAULT_THUOC_CHONGCHIDINH_FILE = os.path.join(_BASE_DIR, "danh_muc_thuoc_chongchidinh.xlsx")
 DEFAULT_MA_THUOC_HOATCHAT_FILE = os.path.join(_BASE_DIR, "danh_muc_ma_thuoc_hoatchat.xlsx")
+DEFAULT_NHAN_VIEN_YTE_FILE = os.path.join(_BASE_DIR, "danh_muc_nhan_vien_yte.xlsx")
+
+# Mã chức danh nghề nghiệp (CHUCDANH_NN) liên quan tới các quy tắc đối chiếu
+# nhân sự - theo xác nhận của đơn vị:
+#   1 = Bác sĩ, 2 = Y sĩ, 3 = Điều dưỡng, 4 = Dược sĩ
+# (5,6,7,8,10: chưa xác nhận đầy đủ ý nghĩa, riêng 6 và 10 được yêu cầu dùng
+#  cho điều kiện "người thực hiện DVKT/đọc kết quả CĐHA không phải BS")
+CHUCDANH_BAC_SI = "1"
+CHUCDANH_Y_SI = "2"
+CHUCDANH_DIEU_DUONG = "3"
+CHUCDANH_DUOC_SI = "4"
+CHUCDANH_DUOC_KE_THUOC = {"1"}          # được kê đơn thuốc: chỉ Bác sĩ
+CHUCDANH_THUC_HIEN_DVKT = {"6", "10"}    # được thực hiện DVKT/kỹ thuật viên
+CHUCDANH_CANH_BAO_SAI_PHAM_VI = {"2", "3", "4"}  # Y sĩ/Điều dưỡng/Dược sĩ - cảnh báo "sai phạm vi hành nghề" khi kê thuốc/đọc KQ
+
+# Từ khóa nhận diện dịch vụ CĐHA/TDCN cần bác sĩ đọc kết quả (siêu âm, điện tim, X-quang)
+TEN_CHI_SO_CAN_BS_DOC_KQ = [
+    "SIÊU ÂM", "SIEU AM", "ĐIỆN TIM", "DIEN TIM", "X-QUANG", "XQUANG", "X QUANG",
+]
 
 # =====================================================================
 #  HẰNG SỐ DÙNG CHUNG
@@ -122,6 +141,58 @@ def _err(ma_lk, nhom, muc_do, truong_loi, gia_tri, mo_ta_loi, huong_xu_ly, nguon
         "huong_xu_ly": huong_xu_ly,
         "nguon_file": nguon_file,
     }
+
+
+def _tra_nhan_vien(macchn, nhan_vien_yte):
+    """Tra cứu thông tin nhân viên theo MACCHN, trả về dict hoặc None nếu không có/không có danh mục."""
+    if not nhan_vien_yte or not macchn:
+        return None
+    return nhan_vien_yte.get(str(macchn).strip())
+
+
+def _kiem_tra_nguoi_ke_don(macchn, nhan_vien_yte):
+    """
+    Kiểm tra người kê đơn thuốc (MA_BAC_SI ở XML2) có đủ điều kiện (CHUCDANH_NN=1, Bác sĩ).
+    Trả về tuple (trang_thai, ghi_chu):
+      trang_thai: "khong_co_danh_muc" | "khong_tim_thay" | "dat" | "sai_pham_vi" | "khong_xac_dinh_cd"
+      ghi_chu: thông tin nhân viên (họ tên, chức danh) nếu tìm thấy
+    """
+    nv = _tra_nhan_vien(macchn, nhan_vien_yte)
+    if nv is None:
+        if not nhan_vien_yte:
+            return "khong_co_danh_muc", ""
+        return "khong_tim_thay", ""
+    cd = nv.get("chucdanh", "")
+    if cd == CHUCDANH_BAC_SI:
+        return "dat", nv.get("ho_ten", "")
+    if cd in CHUCDANH_CANH_BAO_SAI_PHAM_VI:
+        ten_cd = {"2": "Y sĩ", "3": "Điều dưỡng", "4": "Dược sĩ"}.get(cd, f"Chức danh {cd}")
+        return "sai_pham_vi", f"{nv.get('ho_ten', '')} ({ten_cd})"
+    return "khong_xac_dinh_cd", f"{nv.get('ho_ten', '')} (CHUCDANH_NN={cd})"
+
+
+def _kiem_tra_nguoi_thuc_hien_dvkt(macchn, nhan_vien_yte, ma_dv=None):
+    """
+    Kiểm tra người thực hiện DVKT/PTTT (NGUOI_THUC_HIEN) có đủ điều kiện:
+    CHUCDANH_NN thuộc {6,10}, HOẶC được phân công riêng qua DVKT_KHAC/VB_PHANCONG.
+    Trả về tuple (trang_thai, ghi_chu) tương tự _kiem_tra_nguoi_ke_don.
+    """
+    nv = _tra_nhan_vien(macchn, nhan_vien_yte)
+    if nv is None:
+        if not nhan_vien_yte:
+            return "khong_co_danh_muc", ""
+        return "khong_tim_thay", ""
+    cd = nv.get("chucdanh", "")
+    if cd in CHUCDANH_THUC_HIEN_DVKT:
+        return "dat", nv.get("ho_ten", "")
+    # Được phân công riêng (DVKT_KHAC có giá trị và có VB_PHANCONG kèm theo)
+    if nv.get("dvkt_khac") and nv.get("vb_phancong"):
+        if not ma_dv or ma_dv.strip() in (nv.get("dvkt_khac") or ""):
+            return "dat_phan_cong", f"{nv.get('ho_ten', '')} (phân công theo {nv.get('vb_phancong')})"
+    if cd in CHUCDANH_CANH_BAO_SAI_PHAM_VI:
+        ten_cd = {"2": "Y sĩ", "3": "Điều dưỡng", "4": "Dược sĩ"}.get(cd, f"Chức danh {cd}")
+        return "sai_pham_vi", f"{nv.get('ho_ten', '')} ({ten_cd})"
+    return "khong_dat", f"{nv.get('ho_ten', '')} (CHUCDANH_NN={cd})"
 
 
 # =====================================================================
@@ -217,12 +288,61 @@ def _load_ma_thuoc_hoatchat_excel(path):
     return result
 
 
+def _load_nhan_vien_yte_excel(path):
+    """
+    Đọc danh mục nhân viên y tế: cột MACCHN | HO_TEN | CHUCDANH_NN | DVKT_KHAC | VB_PHANCONG
+    -> dict {MACCHN: {"ho_ten":..., "chucdanh": "1"/"2".../ "", "dvkt_khac": "", "vb_phancong": ""}}
+    MACCHN được chuẩn hoá (strip) làm khoá tra cứu.
+    """
+    result = {}
+    if not load_workbook or not os.path.exists(path):
+        return result
+    try:
+        wb = load_workbook(path, data_only=True)
+        sheet = wb.active
+        headers = [str(c.value).strip().upper() if c.value else "" for c in sheet[1]]
+        try:
+            idx_ma = headers.index("MACCHN")
+        except ValueError:
+            return result
+        idx_ten = headers.index("HO_TEN") if "HO_TEN" in headers else None
+        idx_cd = headers.index("CHUCDANH_NN") if "CHUCDANH_NN" in headers else None
+        idx_dvkt = headers.index("DVKT_KHAC") if "DVKT_KHAC" in headers else None
+        idx_vb = headers.index("VB_PHANCONG") if "VB_PHANCONG" in headers else None
+
+        for r in range(2, sheet.max_row + 1):
+            macchn = sheet.cell(r, idx_ma + 1).value
+            if macchn is None or str(macchn).strip() == "":
+                continue
+            macchn = str(macchn).strip()
+
+            chucdanh = ""
+            if idx_cd is not None:
+                cd_val = sheet.cell(r, idx_cd + 1).value
+                if cd_val is not None:
+                    try:
+                        chucdanh = str(int(float(cd_val)))
+                    except (TypeError, ValueError):
+                        chucdanh = str(cd_val).strip()
+
+            result[macchn] = {
+                "ho_ten": str(sheet.cell(r, idx_ten + 1).value).strip() if idx_ten is not None and sheet.cell(r, idx_ten + 1).value else "",
+                "chucdanh": chucdanh,
+                "dvkt_khac": str(sheet.cell(r, idx_dvkt + 1).value).strip() if idx_dvkt is not None and sheet.cell(r, idx_dvkt + 1).value else "",
+                "vb_phancong": str(sheet.cell(r, idx_vb + 1).value).strip() if idx_vb is not None and sheet.cell(r, idx_vb + 1).value else "",
+            }
+    except Exception:
+        pass
+    return result
+
+
 def load_default_danh_muc():
     """
     Nạp các danh mục cố định kèm sẵn ứng dụng (đặt cùng thư mục với bhyt_rules.py):
       - gia_dvkt: dict {MA: GIA}
       - thuoc_chong_chi_dinh: list[{keyword, icd_prefixes, ghi_chu}]
       - ma_thuoc_hoat_chat: dict {MA_THUOC: ten_hoat_chat (lowercase)}
+      - nhan_vien_yte: dict {MACCHN: {ho_ten, chucdanh, dvkt_khac, vb_phancong}}
     Trả về dict có thể truyền trực tiếp vào tham số `danh_muc` của các hàm check_*.
     Nếu file không tồn tại, trả về dict rỗng/{} cho mục đó (không lỗi).
 
@@ -233,7 +353,9 @@ def load_default_danh_muc():
         "gia_dvkt": _load_gia_excel(DEFAULT_GIA_DVKT_FILE),
         "thuoc_chong_chi_dinh": _load_thuoc_chongchidinh_excel(DEFAULT_THUOC_CHONGCHIDINH_FILE),
         "ma_thuoc_hoat_chat": _load_ma_thuoc_hoatchat_excel(DEFAULT_MA_THUOC_HOATCHAT_FILE),
+        "nhan_vien_yte": _load_nhan_vien_yte_excel(DEFAULT_NHAN_VIEN_YTE_FILE),
     }
+
 
 
 def merge_danh_muc(*danh_muc_dicts):
@@ -441,12 +563,39 @@ def check_nhom1_hanh_chinh(ho_so, ma_lk, danh_muc=None):
                 "Bổ sung số Giấy chuyển tuyến/Phiếu chuyển tuyến đầy đủ, đúng số đã cấp tại nơi chuyển đi.", nguon
             ))
 
+    # ---- 1.5 Mã bệnh chính chỉ được chứa 1 mã duy nhất ----
+    ma_benh_chinh = _text(ho_so, "MA_BENH_CHINH")
+    if ma_benh_chinh and re.search(r"[;,]", ma_benh_chinh):
+        errors.append(_err(
+            ma_lk, "1. Hành chính & thẻ BHYT", "Lỗi",
+            "MA_BENH_CHINH", ma_benh_chinh,
+            "Mã bệnh chính (MA_BENH_CHINH) chỉ được khai 1 mã ICD-10 duy nhất, "
+            "không được ghi nhiều mã phân tách bằng ';' hoặc ','.",
+            "Chỉ giữ lại 1 mã bệnh chính chính xác nhất; các mã bệnh khác (nếu có) "
+            "chuyển sang MA_BENH_KT (bệnh kèm theo).", nguon
+        ))
+
+    # ---- 1.6 Công thức tổng chi phí: T_TONGCHI_BV = T_TONGCHI_BH + T_BNTT + T_BNCCT ----
+    t_tongchi_bv = _to_float(_text(ho_so, "T_TONGCHI_BV"))
+    t_tongchi_bh = _to_float(_text(ho_so, "T_TONGCHI_BH"))
+    t_bntt = _to_float(_text(ho_so, "T_BNTT"))
+    t_bncct = _to_float(_text(ho_so, "T_BNCCT"))
+
+    if t_tongchi_bv is not None and t_tongchi_bh is not None and t_bntt is not None and t_bncct is not None:
+        tong_tinh_lai = round(t_tongchi_bh + t_bntt + t_bncct, 0)
+        if abs(round(t_tongchi_bv, 0) - tong_tinh_lai) > max(1, 0.01 * tong_tinh_lai):
+            errors.append(_err(
+                ma_lk, "1. Hành chính & thẻ BHYT", "Lỗi",
+                "T_TONGCHI_BV", t_tongchi_bv,
+                f"Tổng chi phí KCB (T_TONGCHI_BV={t_tongchi_bv:,.0f}) không khớp với tổng "
+                f"T_TONGCHI_BH ({t_tongchi_bh:,.0f}) + T_BNTT ({t_bntt:,.0f}) + T_BNCCT "
+                f"({t_bncct:,.0f}) = {tong_tinh_lai:,.0f}.",
+                "Kiểm tra lại công thức tính: T_TONGCHI_BV = T_TONGCHI_BH + T_BNTT + T_BNCCT. "
+                "Rà soát các khoản chi phí BHYT chi trả, bệnh nhân tự trả, bệnh nhân cùng chi trả.", nguon
+            ))
+
     return errors
 
-
-# =====================================================================
-#  NHÓM 2: DANH MỤC THUỐC / DVKT / VTYT, GIÁ, ĐỊNH MỨC KINH TẾ KỸ THUẬT
-# =====================================================================
 
 def check_nhom2_danh_muc_gia(ho_so, ma_lk, file_type, danh_muc=None):
     """
@@ -454,17 +603,54 @@ def check_nhom2_danh_muc_gia(ho_so, ma_lk, file_type, danh_muc=None):
       danh_muc['gia_dvkt']    : dict {MA_DICH_VU: gia_duyet}
       danh_muc['gia_vtyt']    : dict {MA_VTYT: gia_duyet}
       danh_muc['dinh_muc']    : dict {MA_DICH_VU: {MA_VTYT: so_luong_toi_da}}
+      danh_muc['nhan_vien_yte']: dict {MACCHN: {ho_ten, chucdanh, dvkt_khac, vb_phancong}}
 
     LƯU Ý: Theo yêu cầu, KHÔNG kiểm tra giá/đơn giá thuốc (file "Thuốc") trong
     nhóm này nữa - việc kiểm tra thuốc chỉ còn tập trung vào tương tác/chống
-    chỉ định theo ICD-10 (xem nhóm 3 - mục 3.5).
+    chỉ định theo ICD-10 (xem nhóm 3 - mục 3.5) và chứng chỉ hành nghề người
+    kê đơn (mục 2.0 dưới đây).
     Nếu không có danh mục giá DVKT, chỉ kiểm tra các quy tắc logic nội bộ
     (đơn giá x số lượng = thành tiền, thành tiền BH <= thành tiền, ...) cho DVKT.
     """
     errors = []
     danh_muc = danh_muc or {}
+    nhan_vien_yte = danh_muc.get("nhan_vien_yte", {})
 
     if file_type == "Thuốc":
+        # ---- 2.0 Chứng chỉ hành nghề người kê đơn (MA_BAC_SI phải là Bác sĩ) ----
+        ma_bac_si = _text(ho_so, "MA_BAC_SI")
+        ma_thuoc = _text(ho_so, "MA_THUOC")
+        ten_thuoc = _text(ho_so, "TEN_THUOC")
+
+        if ma_bac_si:
+            trang_thai, ghi_chu = _kiem_tra_nguoi_ke_don(ma_bac_si, nhan_vien_yte)
+            if trang_thai == "khong_tim_thay":
+                errors.append(_err(
+                    ma_lk, "2. Danh mục - Giá - Định mức", "Cảnh báo",
+                    "MA_BAC_SI", ma_bac_si,
+                    f"Không tìm thấy mã chứng chỉ hành nghề '{ma_bac_si}' (người kê thuốc "
+                    f"'{ma_thuoc}' - {ten_thuoc}) trong danh mục nhân viên y tế của đơn vị.",
+                    "Kiểm tra lại MA_BAC_SI hoặc bổ sung nhân viên này vào danh mục nhân viên y tế "
+                    "(danh_muc_nhan_vien_yte.xlsx).", "XML2 - Thuốc"
+                ))
+            elif trang_thai == "sai_pham_vi":
+                errors.append(_err(
+                    ma_lk, "2. Danh mục - Giá - Định mức", "Lỗi",
+                    "MA_BAC_SI", ma_bac_si,
+                    f"Người kê đơn thuốc '{ma_thuoc}' ({ten_thuoc}) là {ghi_chu}, không phải Bác sĩ "
+                    "(CHUCDANH_NN=1) - không đúng phạm vi hành nghề được kê đơn thuốc.",
+                    "Kiểm tra lại người kê đơn (MA_BAC_SI); chỉ Bác sĩ mới được kê đơn thuốc theo "
+                    "quy định về phạm vi hành nghề.", "XML2 - Thuốc"
+                ))
+            elif trang_thai == "khong_xac_dinh_cd":
+                errors.append(_err(
+                    ma_lk, "2. Danh mục - Giá - Định mức", "Cảnh báo",
+                    "MA_BAC_SI", ma_bac_si,
+                    f"Người kê đơn thuốc '{ma_thuoc}' ({ten_thuoc}) - {ghi_chu} - chưa xác định rõ "
+                    "có phải Bác sĩ hay không.",
+                    "Kiểm tra lại chức danh nghề nghiệp (CHUCDANH_NN) của nhân viên này trong danh mục.",
+                    "XML2 - Thuốc"
+                ))
         # Không kiểm tra giá/đơn giá/thành tiền của thuốc nữa.
         # Việc kiểm tra thuốc tập trung ở Nhóm 3 - mục 3.5 (tương tác/chống chỉ định theo ICD-10).
         return errors
@@ -533,12 +719,92 @@ def check_nhom2_danh_muc_gia(ho_so, ma_lk, file_type, danh_muc=None):
                 "nếu vượt định mức cần ghi rõ lý do (biến chứng, tai biến) trong hồ sơ bệnh án.", nguon
             ))
 
+        # ---- 2.4 MA_MAY phải TRỐNG khi là VTYT hoặc khi TEN_DICH_VU là "giường" ----
+        ma_vat_tu = _text(ho_so, "MA_VAT_TU")
+        ma_may = _text(ho_so, "MA_MAY")
+        la_giuong = "giường" in (ten_dv or "").lower() or "giuong" in (ten_dv or "").lower()
+        if (ma_vat_tu or la_giuong) and ma_may:
+            ly_do = "là vật tư y tế (có MA_VAT_TU)" if ma_vat_tu else "là dịch vụ giường bệnh"
+            errors.append(_err(
+                ma_lk, "2. Danh mục - Giá - Định mức", "Lỗi",
+                "MA_MAY", ma_may,
+                f"Dòng {ly_do} không được khai mã máy thực hiện (MA_MAY), nhưng hiện đang có "
+                f"giá trị '{ma_may}'.",
+                "Xoá giá trị MA_MAY ở dòng này (VTYT/giường bệnh không gắn với máy thực hiện).", nguon
+            ))
+
+        # ---- 2.5 Người thực hiện DVKT (NGUOI_THUC_HIEN) phải đúng chứng chỉ hành nghề ----
+        nguoi_th = _text(ho_so, "NGUOI_THUC_HIEN")
+        if nguoi_th and not ma_vat_tu and not la_giuong:
+            trang_thai, ghi_chu = _kiem_tra_nguoi_thuc_hien_dvkt(nguoi_th, nhan_vien_yte, ma_dv=ma_dv)
+            if trang_thai == "khong_tim_thay":
+                errors.append(_err(
+                    ma_lk, "2. Danh mục - Giá - Định mức", "Cảnh báo",
+                    "NGUOI_THUC_HIEN", nguoi_th,
+                    f"Không tìm thấy mã chứng chỉ hành nghề '{nguoi_th}' (người thực hiện DVKT "
+                    f"'{ma_dv}' - {ten_dv}) trong danh mục nhân viên y tế.",
+                    "Kiểm tra lại NGUOI_THUC_HIEN hoặc bổ sung nhân viên vào danh mục nhân viên y tế.", nguon
+                ))
+            elif trang_thai == "khong_dat":
+                errors.append(_err(
+                    ma_lk, "2. Danh mục - Giá - Định mức", "Cảnh báo",
+                    "NGUOI_THUC_HIEN", nguoi_th,
+                    f"Người thực hiện DVKT '{ma_dv}' ({ten_dv}) - {ghi_chu} - không thuộc chức danh "
+                    "kỹ thuật viên (CHUCDANH_NN=6,10) và không có văn bản phân công thực hiện kỹ thuật khác.",
+                    "Kiểm tra lại người thực hiện hoặc bổ sung văn bản phân công (DVKT_KHAC/VB_PHANCONG) "
+                    "trong danh mục nhân viên y tế nếu việc phân công là có thật.", nguon
+                ))
+            elif trang_thai == "sai_pham_vi":
+                errors.append(_err(
+                    ma_lk, "2. Danh mục - Giá - Định mức", "Cảnh báo",
+                    "NGUOI_THUC_HIEN", nguoi_th,
+                    f"Người thực hiện DVKT '{ma_dv}' ({ten_dv}) là {ghi_chu}, không phải kỹ thuật viên "
+                    "và không có văn bản phân công thực hiện kỹ thuật khác.",
+                    "Kiểm tra lại người thực hiện hoặc bổ sung văn bản phân công nếu hợp lệ.", nguon
+                ))
+
+        # ---- 2.6 Logic thời gian: NGAY_YL <= NGAY_TH_YL < NGAY_KQ ----
+        ngay_yl = _text(ho_so, "NGAY_YL")
+        ngay_th_yl = _text(ho_so, "NGAY_TH_YL")
+        ngay_kq = _text(ho_so, "NGAY_KQ")
+        dt_yl = _to_datetime(ngay_yl) if ngay_yl else None
+        dt_th_yl = _to_datetime(ngay_th_yl) if ngay_th_yl else None
+        dt_kq = _to_datetime(ngay_kq) if ngay_kq else None
+
+        if dt_yl and dt_th_yl and dt_th_yl < dt_yl:
+            errors.append(_err(
+                ma_lk, "2. Danh mục - Giá - Định mức", "Lỗi",
+                "NGAY_TH_YL", ngay_th_yl,
+                f"DVKT '{ma_dv}' ({ten_dv}): Ngày thực hiện y lệnh ({ngay_th_yl}) trước ngày "
+                f"chỉ định (NGAY_YL={ngay_yl}) - không hợp lý.",
+                "Kiểm tra lại NGAY_YL và NGAY_TH_YL, đảm bảo NGAY_TH_YL >= NGAY_YL.", nguon
+            ))
+        if dt_th_yl and dt_kq and dt_kq <= dt_th_yl:
+            errors.append(_err(
+                ma_lk, "2. Danh mục - Giá - Định mức", "Lỗi",
+                "NGAY_KQ", ngay_kq,
+                f"DVKT '{ma_dv}' ({ten_dv}): Ngày có kết quả ({ngay_kq}) phải lớn hơn ngày thực hiện "
+                f"y lệnh (NGAY_TH_YL={ngay_th_yl}).",
+                "Kiểm tra lại NGAY_TH_YL và NGAY_KQ, đảm bảo NGAY_KQ > NGAY_TH_YL.", nguon
+            ))
+
+        # ---- 2.7 Thời gian thực hiện tối thiểu 6 phút cho Điện tim/Siêu âm/X-quang ----
+        la_dt_sa_xq = any(k in (ten_dv or "").upper() for k in
+                           ["ĐIỆN TIM", "DIEN TIM", "SIÊU ÂM", "SIEU AM", "X-QUANG", "XQUANG", "X QUANG"])
+        if la_dt_sa_xq and dt_th_yl and dt_kq:
+            so_phut = (dt_kq - dt_th_yl).total_seconds() / 60
+            if 0 <= so_phut < 6:
+                errors.append(_err(
+                    ma_lk, "2. Danh mục - Giá - Định mức", "Cảnh báo",
+                    "NGAY_KQ", ngay_kq,
+                    f"DVKT '{ma_dv}' ({ten_dv}): thời gian từ lúc thực hiện (NGAY_TH_YL={ngay_th_yl}) "
+                    f"đến lúc có kết quả (NGAY_KQ={ngay_kq}) chỉ {so_phut:.0f} phút, ít hơn mức tối "
+                    "thiểu 6 phút đối với Điện tim/Siêu âm/X-quang.",
+                    "Kiểm tra lại thời gian thực hiện và trả kết quả; nếu thực hiện đúng quy trình "
+                    "cần đảm bảo thời gian hợp lý (>=6 phút) để tránh bị nghi vấn khi giám định.", nguon
+                ))
+
     return errors
-
-
-# =====================================================================
-#  NHÓM 3: HỢP LÝ CHỈ ĐỊNH Y KHOA (BẮT CHÉO DỮ LIỆU)
-# =====================================================================
 
 def check_nhom3_hop_ly_chi_dinh(ho_so_hc, file_type, items_by_malk, ma_lk, danh_muc=None):
     """
@@ -552,6 +818,7 @@ def check_nhom3_hop_ly_chi_dinh(ho_so_hc, file_type, items_by_malk, ma_lk, danh_
     """
     errors = []
     danh_muc = danh_muc or {}
+    nhan_vien_yte = danh_muc.get("nhan_vien_yte", {})
     if ho_so_hc is None:
         return errors
 
@@ -689,6 +956,7 @@ def check_nhom3_hop_ly_chi_dinh(ho_so_hc, file_type, items_by_malk, ma_lk, danh_
                 ))
 
     # ---- 3.4 Liều dùng và số ngày điều trị (thuốc) ----
+    nguon = "XML2 - Thuốc"
     ngay_ra = _text(ho_so_hc, "NGAY_RA")
     dt_ra = _to_datetime(ngay_ra)
     so_ngay_dieu_tri = None
@@ -785,6 +1053,7 @@ def check_nhom3_hop_ly_chi_dinh(ho_so_hc, file_type, items_by_malk, ma_lk, danh_
     ]
 
     # 3.6.a: MA_MAY ở XML3 - DVKT là xét nghiệm/CĐHA mà thiếu mã máy
+    nguon = "XML3 - DVKT"
     for dv in ds_dvkt:
         ma_dv = dv.get("MA_DICH_VU", "")
         ten_dv = (dv.get("TEN_DICH_VU") or "").upper()
@@ -803,12 +1072,21 @@ def check_nhom3_hop_ly_chi_dinh(ho_so_hc, file_type, items_by_malk, ma_lk, danh_
             ))
 
     # 3.6.b: Mã DVKT trong kết quả XML4 phải có chỉ định tương ứng ở XML3
+    nguon = "XML4 - CĐHA/TDCN"
     for item in ds_cdha:
         ma_dv_cdha = item.get("MA_DICH_VU", "")
         ten_dv_cdha = item.get("TEN_DICH_VU", "")
         ten_chi_so = item.get("TEN_CHI_SO", "")
+        gia_tri = item.get("GIA_TRI", "")
+        mo_ta = item.get("MO_TA", "")
+        ket_luan = item.get("KET_LUAN", "")
+        ma_bs_doc_kq = item.get("MA_BS_DOC_KQ", "")
+        ngay_yl_item = item.get("NGAY_YL", "")
+        ngay_th_yl_item = item.get("NGAY_TH_YL", "")
         ngay_kq = item.get("NGAY_KQ", "")
-        ngay_yl_cdha = item.get("NGAY_YL", "")
+        ngay_yl_cdha = ngay_yl_item
+
+        la_sa_dt_xq = any(k in (ten_chi_so or ten_dv_cdha or "").upper() for k in TEN_CHI_SO_CAN_BS_DOC_KQ)
 
         if ma_dv_cdha and ma_dvkt_set and ma_dv_cdha not in ma_dvkt_set:
             errors.append(_err(
@@ -822,9 +1100,83 @@ def check_nhom3_hop_ly_chi_dinh(ho_so_hc, file_type, items_by_malk, ma_lk, danh_
                 "quả thừa trong XML4.", nguon
             ))
 
-        # 3.6.c: Ngày kết quả (NGAY_KQ) phải >= ngày chỉ định (NGAY_YL) tương ứng ở XML3
+        # 3.6.d: Siêu âm/Điện tim/X-quang -> GIA_TRI phải TRỐNG, MO_TA + KET_LUAN bắt buộc có
+        if la_sa_dt_xq:
+            if gia_tri:
+                errors.append(_err(
+                    ma_lk, "3. Hợp lý chỉ định y khoa", "Lỗi",
+                    "GIA_TRI", gia_tri,
+                    f"'{ten_chi_so or ten_dv_cdha}' là Siêu âm/Điện tim/X-quang - không được khai "
+                    f"GIA_TRI (chỉ áp dụng cho xét nghiệm định lượng), hiện đang có giá trị '{gia_tri}'.",
+                    "Xoá giá trị GIA_TRI ở dòng này; mô tả/kết luận của SA-ĐT-XQ ghi vào MO_TA/KET_LUAN.", nguon
+                ))
+            if not mo_ta or not ket_luan:
+                thieu = []
+                if not mo_ta:
+                    thieu.append("MO_TA")
+                if not ket_luan:
+                    thieu.append("KET_LUAN")
+                errors.append(_err(
+                    ma_lk, "3. Hợp lý chỉ định y khoa", "Lỗi",
+                    "/".join(thieu), "(thiếu)",
+                    f"'{ten_chi_so or ten_dv_cdha}' là Siêu âm/Điện tim/X-quang nhưng thiếu "
+                    f"{' và '.join(thieu)} - đây là trường bắt buộc cho kết quả CĐHA/TDCN.",
+                    "Bổ sung đầy đủ MO_TA (mô tả hình ảnh/kết quả) và KET_LUAN (kết luận chẩn đoán).", nguon
+                ))
+
+        # 3.6.e: Bác sĩ đọc kết quả (MA_BS_DOC_KQ) - SA/ĐT/XQ cần Bác sĩ (CHUCDANH_NN=1),
+        # các loại khác cần kỹ thuật viên (CHUCDANH_NN=6,10)
+        if ma_bs_doc_kq:
+            if la_sa_dt_xq:
+                trang_thai, ghi_chu = _kiem_tra_nguoi_ke_don(ma_bs_doc_kq, nhan_vien_yte)
+                # _kiem_tra_nguoi_ke_don kiểm tra CHUCDANH_NN=1 (Bác sĩ) - đúng yêu cầu cho SA/ĐT/XQ
+                yeu_cau = "Bác sĩ (CHUCDANH_NN=1)"
+            else:
+                trang_thai, ghi_chu = _kiem_tra_nguoi_thuc_hien_dvkt(ma_bs_doc_kq, nhan_vien_yte, ma_dv=ma_dv_cdha)
+                yeu_cau = "Kỹ thuật viên (CHUCDANH_NN=6,10)"
+
+            if trang_thai == "khong_tim_thay":
+                errors.append(_err(
+                    ma_lk, "3. Hợp lý chỉ định y khoa", "Cảnh báo",
+                    "MA_BS_DOC_KQ", ma_bs_doc_kq,
+                    f"Không tìm thấy mã chứng chỉ hành nghề '{ma_bs_doc_kq}' (người đọc kết quả "
+                    f"'{ten_chi_so or ten_dv_cdha}') trong danh mục nhân viên y tế.",
+                    "Kiểm tra lại MA_BS_DOC_KQ hoặc bổ sung nhân viên vào danh mục nhân viên y tế.", nguon
+                ))
+            elif trang_thai in ("sai_pham_vi", "khong_dat", "khong_xac_dinh_cd"):
+                errors.append(_err(
+                    ma_lk, "3. Hợp lý chỉ định y khoa", "Cảnh báo",
+                    "MA_BS_DOC_KQ", ma_bs_doc_kq,
+                    f"Người đọc kết quả '{ten_chi_so or ten_dv_cdha}' - {ghi_chu} - không đáp ứng yêu "
+                    f"cầu phải là {yeu_cau}.",
+                    "Kiểm tra lại người đọc/ký kết quả cho đúng phạm vi chuyên môn quy định.", nguon
+                ))
+
+        # 3.6.c: Ngày kết quả (NGAY_KQ) phải >= ngày chỉ định (NGAY_YL) tương ứng ở XML3,
+        # và nếu XML4 có sẵn NGAY_YL/NGAY_TH_YL riêng thì kiểm tra NGAY_KQ > NGAY_TH_YL >= NGAY_YL
         dt_kq = _to_datetime(ngay_kq) if ngay_kq else None
-        if dt_kq:
+        dt_yl_item = _to_datetime(ngay_yl_item) if ngay_yl_item else None
+        dt_th_yl_item = _to_datetime(ngay_th_yl_item) if ngay_th_yl_item else None
+
+        if dt_yl_item and dt_th_yl_item and dt_th_yl_item < dt_yl_item:
+            errors.append(_err(
+                ma_lk, "3. Hợp lý chỉ định y khoa", "Lỗi",
+                "NGAY_TH_YL", ngay_th_yl_item,
+                f"'{ten_chi_so or ten_dv_cdha}': Ngày thực hiện y lệnh ({ngay_th_yl_item}) trước "
+                f"ngày chỉ định (NGAY_YL={ngay_yl_item}) - không hợp lý.",
+                "Kiểm tra lại NGAY_YL và NGAY_TH_YL trong XML4, đảm bảo NGAY_TH_YL >= NGAY_YL.", nguon
+            ))
+        if dt_th_yl_item and dt_kq and dt_kq <= dt_th_yl_item:
+            errors.append(_err(
+                ma_lk, "3. Hợp lý chỉ định y khoa", "Lỗi",
+                "NGAY_KQ", ngay_kq,
+                f"'{ten_chi_so or ten_dv_cdha}': Ngày có kết quả ({ngay_kq}) phải lớn hơn ngày "
+                f"thực hiện y lệnh (NGAY_TH_YL={ngay_th_yl_item}).",
+                "Kiểm tra lại NGAY_TH_YL và NGAY_KQ trong XML4, đảm bảo NGAY_KQ > NGAY_TH_YL.", nguon
+            ))
+
+        if dt_kq and not dt_th_yl_item:
+            # Không có NGAY_TH_YL riêng ở XML4 -> đối chiếu chéo với NGAY_YL của DVKT (XML3) như trước
             ngay_yl_dvkt = None
             for dv in ds_dvkt:
                 if dv.get("MA_DICH_VU") == ma_dv_cdha and dv.get("NGAY_YL"):
@@ -845,12 +1197,45 @@ def check_nhom3_hop_ly_chi_dinh(ho_so_hc, file_type, items_by_malk, ma_lk, danh_
                     "(ngày có kết quả ở XML4), đảm bảo NGAY_KQ >= NGAY_YL.", nguon
                 ))
 
+    # ---- 3.7 Phẫu thuật/thủ thuật (XML5): THOI_DIEM_DBLS > NGAY_VAO, NGUOI_THUC_HIEN phải là Bác sĩ ----
+    nguon = "XML5 - Phẫu thuật thủ thuật"
+    for item in data.get("pttt", []):
+        ma_pttt = item.get("MA_PTTT", "")
+        ten_pttt = item.get("TEN_PTTT", "")
+        thoi_diem_dbls = item.get("THOI_DIEM_DBLS", "")
+        nguoi_th_pttt = item.get("NGUOI_THUC_HIEN", "")
+
+        dt_dbls = _to_datetime(thoi_diem_dbls) if thoi_diem_dbls else None
+        if dt_dbls and dt_vao and dt_dbls <= dt_vao:
+            errors.append(_err(
+                ma_lk, "3. Hợp lý chỉ định y khoa", "Lỗi",
+                "THOI_DIEM_DBLS", thoi_diem_dbls,
+                f"PTTT '{ma_pttt}' ({ten_pttt}): Thời điểm bắt đầu phẫu thuật/thủ thuật "
+                f"({thoi_diem_dbls}) phải lớn hơn Ngày vào viện (NGAY_VAO={ngay_vao}).",
+                "Kiểm tra lại THOI_DIEM_DBLS trong XML5 và NGAY_VAO trong XML1, đảm bảo "
+                "THOI_DIEM_DBLS > NGAY_VAO.", nguon
+            ))
+
+        if nguoi_th_pttt:
+            trang_thai, ghi_chu = _kiem_tra_nguoi_ke_don(nguoi_th_pttt, nhan_vien_yte)
+            if trang_thai == "khong_tim_thay":
+                errors.append(_err(
+                    ma_lk, "3. Hợp lý chỉ định y khoa", "Cảnh báo",
+                    "NGUOI_THUC_HIEN", nguoi_th_pttt,
+                    f"Không tìm thấy mã chứng chỉ hành nghề '{nguoi_th_pttt}' (người thực hiện "
+                    f"PTTT '{ma_pttt}' - {ten_pttt}) trong danh mục nhân viên y tế.",
+                    "Kiểm tra lại NGUOI_THUC_HIEN hoặc bổ sung nhân viên vào danh mục nhân viên y tế.", nguon
+                ))
+            elif trang_thai in ("sai_pham_vi", "khong_xac_dinh_cd"):
+                errors.append(_err(
+                    ma_lk, "3. Hợp lý chỉ định y khoa", "Lỗi",
+                    "NGUOI_THUC_HIEN", nguoi_th_pttt,
+                    f"Người thực hiện PTTT '{ma_pttt}' ({ten_pttt}) - {ghi_chu} - không phải Bác sĩ "
+                    "(CHUCDANH_NN=1). Phẫu thuật/thủ thuật phải do Bác sĩ thực hiện.",
+                    "Kiểm tra lại người thực hiện (NGUOI_THUC_HIEN) trong XML5.", nguon
+                ))
+
     return errors
-
-
-# =====================================================================
-#  NHÓM 4: THỜI GIAN KCB & TRÙNG LẶP ĐỢT ĐIỀU TRỊ
-# =====================================================================
 
 def check_nhom4_thoi_gian_trung_lap(ho_so, file_type, all_hanh_chinh=None):
     """
@@ -1084,3 +1469,63 @@ def rebuild_gia_dvkt_from_source(file_bytes_or_path):
     _save_gia_excel(gia_dvkt, DEFAULT_GIA_DVKT_FILE)
 
     return {"so_ma_gia_dvkt": len(gia_dvkt)}
+
+
+def rebuild_nhan_vien_yte_from_source(file_bytes_or_path):
+    """
+    Nhận file Excel danh mục nhân viên y tế GỐC (cấu trúc như FileNhanVienYTe.xlsx,
+    cần có cột MACCHN, HO_TEN, CHUCDANH_NN; tùy chọn DVKT_KHAC, VB_PHANCONG).
+
+    Tự động lọc và ghi đè danh_muc_nhan_vien_yte.xlsx (5 cột rút gọn).
+
+    Trả về dict {"so_nhan_vien": int}. Raise ValueError nếu thiếu cột bắt buộc.
+    """
+    wb = load_workbook(file_bytes_or_path, data_only=True)
+    sheet = wb.active
+    headers = [str(c.value).strip().upper() if c.value else "" for c in sheet[1]]
+
+    required = ["MACCHN", "HO_TEN", "CHUCDANH_NN"]
+    missing = [c for c in required if c not in headers]
+    if missing:
+        raise ValueError(
+            "File danh mục nhân viên y tế thiếu các cột bắt buộc: " + ", ".join(missing) +
+            ". Cần có đủ các cột: MACCHN, HO_TEN, CHUCDANH_NN (và tùy chọn DVKT_KHAC, VB_PHANCONG)."
+        )
+
+    idx = {h: headers.index(h) for h in headers if h}
+    idx_ma = idx["MACCHN"]
+    idx_ten = idx["HO_TEN"]
+    idx_cd = idx["CHUCDANH_NN"]
+    idx_dvkt = idx.get("DVKT_KHAC")
+    idx_vb = idx.get("VB_PHANCONG")
+
+    from openpyxl import Workbook
+    wb_out = Workbook()
+    ws_out = wb_out.active
+    ws_out.append(["MACCHN", "HO_TEN", "CHUCDANH_NN", "DVKT_KHAC", "VB_PHANCONG"])
+
+    count = 0
+    for r in range(2, sheet.max_row + 1):
+        macchn = sheet.cell(r, idx_ma + 1).value
+        if macchn is None or str(macchn).strip() == "":
+            continue
+        ten = sheet.cell(r, idx_ten + 1).value
+        cd = sheet.cell(r, idx_cd + 1).value
+        try:
+            cd = str(int(float(cd))) if cd is not None else ""
+        except (TypeError, ValueError):
+            cd = str(cd).strip() if cd else ""
+        dvkt = sheet.cell(r, idx_dvkt + 1).value if idx_dvkt is not None else None
+        vb = sheet.cell(r, idx_vb + 1).value if idx_vb is not None else None
+
+        ws_out.append([
+            str(macchn).strip(),
+            str(ten).strip() if ten else "",
+            cd,
+            str(dvkt).strip() if dvkt else "",
+            str(vb).strip() if vb else "",
+        ])
+        count += 1
+
+    wb_out.save(DEFAULT_NHAN_VIEN_YTE_FILE)
+    return {"so_nhan_vien": count}
