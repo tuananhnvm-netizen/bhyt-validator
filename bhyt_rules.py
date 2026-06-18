@@ -171,25 +171,28 @@ def _kiem_tra_nguoi_ke_don(macchn, nhan_vien_yte):
     return "khong_xac_dinh_cd", f"{nv.get('ho_ten', '')} (CHUCDANH_NN={cd})"
 
 
-def _kiem_tra_nguoi_thuc_hien_dvkt(macchn, nhan_vien_yte, ma_dv=None):
+def _kiem_tra_nguoi_thuc_hien_dvkt(macchn, nhan_vien_yte, ma_dv=None, chucdanh_hop_le=None):
     """
     Kiểm tra người thực hiện DVKT/PTTT (NGUOI_THUC_HIEN) có đủ điều kiện:
-    CHUCDANH_NN thuộc {6,10}, HOẶC được phân công riêng qua DVKT_KHAC/VB_PHANCONG.
+    CHUCDANH_NN thuộc `chucdanh_hop_le` (mặc định CHUCDANH_THUC_HIEN_DVKT = {6,10}),
+    HOẶC được phân công riêng qua DVKT_KHAC/VB_PHANCONG (hai điều kiện độc lập - OR).
     Trả về tuple (trang_thai, ghi_chu) tương tự _kiem_tra_nguoi_ke_don.
     """
+    if chucdanh_hop_le is None:
+        chucdanh_hop_le = CHUCDANH_THUC_HIEN_DVKT
     nv = _tra_nhan_vien(macchn, nhan_vien_yte)
     if nv is None:
         if not nhan_vien_yte:
             return "khong_co_danh_muc", ""
         return "khong_tim_thay", ""
     cd = nv.get("chucdanh", "")
-    if cd in CHUCDANH_THUC_HIEN_DVKT:
+    if cd in chucdanh_hop_le:
         return "dat", nv.get("ho_ten", "")
-    # Được phân công riêng (DVKT_KHAC có giá trị và có VB_PHANCONG kèm theo)
+    # Được phân công riêng (DVKT_KHAC có giá trị và có VB_PHANCONG kèm theo) - độc lập với CDNN
     if nv.get("dvkt_khac") and nv.get("vb_phancong"):
         if not ma_dv or ma_dv.strip() in (nv.get("dvkt_khac") or ""):
             return "dat_phan_cong", f"{nv.get('ho_ten', '')} (phân công theo {nv.get('vb_phancong')})"
-    if cd in CHUCDANH_CANH_BAO_SAI_PHAM_VI:
+    if cd in CHUCDANH_CANH_BAO_SAI_PHAM_VI and cd not in chucdanh_hop_le:
         ten_cd = {"2": "Y sĩ", "3": "Điều dưỡng", "4": "Dược sĩ"}.get(cd, f"Chức danh {cd}")
         return "sai_pham_vi", f"{nv.get('ho_ten', '')} ({ten_cd})"
     return "khong_dat", f"{nv.get('ho_ten', '')} (CHUCDANH_NN={cd})"
@@ -733,35 +736,10 @@ def check_nhom2_danh_muc_gia(ho_so, ma_lk, file_type, danh_muc=None):
                 "Xoá giá trị MA_MAY ở dòng này (VTYT/giường bệnh không gắn với máy thực hiện).", nguon
             ))
 
-        # ---- 2.5 Người thực hiện DVKT (NGUOI_THUC_HIEN) phải đúng chứng chỉ hành nghề ----
-        nguoi_th = _text(ho_so, "NGUOI_THUC_HIEN")
-        if nguoi_th and not ma_vat_tu and not la_giuong:
-            trang_thai, ghi_chu = _kiem_tra_nguoi_thuc_hien_dvkt(nguoi_th, nhan_vien_yte, ma_dv=ma_dv)
-            if trang_thai == "khong_tim_thay":
-                errors.append(_err(
-                    ma_lk, "2. Danh mục - Giá - Định mức", "Cảnh báo",
-                    "NGUOI_THUC_HIEN", nguoi_th,
-                    f"Không tìm thấy mã chứng chỉ hành nghề '{nguoi_th}' (người thực hiện DVKT "
-                    f"'{ma_dv}' - {ten_dv}) trong danh mục nhân viên y tế.",
-                    "Kiểm tra lại NGUOI_THUC_HIEN hoặc bổ sung nhân viên vào danh mục nhân viên y tế.", nguon
-                ))
-            elif trang_thai == "khong_dat":
-                errors.append(_err(
-                    ma_lk, "2. Danh mục - Giá - Định mức", "Cảnh báo",
-                    "NGUOI_THUC_HIEN", nguoi_th,
-                    f"Người thực hiện DVKT '{ma_dv}' ({ten_dv}) - {ghi_chu} - không thuộc chức danh "
-                    "kỹ thuật viên (CHUCDANH_NN=6,10) và không có văn bản phân công thực hiện kỹ thuật khác.",
-                    "Kiểm tra lại người thực hiện hoặc bổ sung văn bản phân công (DVKT_KHAC/VB_PHANCONG) "
-                    "trong danh mục nhân viên y tế nếu việc phân công là có thật.", nguon
-                ))
-            elif trang_thai == "sai_pham_vi":
-                errors.append(_err(
-                    ma_lk, "2. Danh mục - Giá - Định mức", "Cảnh báo",
-                    "NGUOI_THUC_HIEN", nguoi_th,
-                    f"Người thực hiện DVKT '{ma_dv}' ({ten_dv}) là {ghi_chu}, không phải kỹ thuật viên "
-                    "và không có văn bản phân công thực hiện kỹ thuật khác.",
-                    "Kiểm tra lại người thực hiện hoặc bổ sung văn bản phân công nếu hợp lệ.", nguon
-                ))
+        # ---- 2.5 Người thực hiện DVKT (NGUOI_THUC_HIEN) ----
+        # ĐÃ CHUYỂN sang bhyt_rules_bo_sung.py (check_nguoi_thuc_hien_dvkt_bo_sung) theo yêu cầu
+        # cập nhật logic: cho phép thêm CDNN=2 (Y sĩ), DVKT có tên bắt đầu "Khám" bắt buộc CDNN=1,
+        # và ngoại lệ mã CCHN 0870/CCHN-D-SYT-TNI được phép thực hiện mọi DVKT X-quang.
 
         # ---- 2.6 Logic thời gian: NGAY_YL <= NGAY_TH_YL < NGAY_KQ ----
         ngay_yl = _text(ho_so, "NGAY_YL")

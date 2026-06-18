@@ -55,6 +55,18 @@ except Exception as _e:
     st.info("Vui lòng đảm bảo đã upload đúng file bhyt_rules.py mới nhất lên GitHub.")
     st.stop()
 
+# Import bhyt_rules_bo_sung - các điều kiện đối chiếu bổ sung (tách riêng,
+# không bắt buộc; nếu thiếu file vẫn chạy được, chỉ bỏ qua các điều kiện này)
+try:
+    import bhyt_rules_bo_sung as _brbs
+    importlib.reload(_brbs)
+    check_dvkt_bo_sung_full = _brbs.check_dvkt_bo_sung_full
+    _CO_RULE_BO_SUNG = True
+except Exception as _e_bs:
+    _CO_RULE_BO_SUNG = False
+    def check_dvkt_bo_sung_full(*args, **kwargs):
+        return []
+
 
 st.set_page_config(page_title="Kiểm tra XML BHYT", layout="wide")
 
@@ -558,6 +570,11 @@ with tab1:
                 # Nhóm 2: Danh mục - giá - định mức (Thuốc, DVKT)
                 if file_type in ("Thuốc", "Dịch vụ kỹ thuật"):
                     for e in check_nhom2_danh_muc_gia(ho_so, ma_lk, file_type, danh_muc=DANH_MUC):
+                        all_errors.append(e)
+
+                # Điều kiện đối chiếu BỔ SUNG (file riêng bhyt_rules_bo_sung.py)
+                if file_type == "Dịch vụ kỹ thuật":
+                    for e in check_dvkt_bo_sung_full(ho_so, ma_lk, "", "", DANH_MUC):
                         all_errors.append(e)
 
         # Nhóm 3: Hợp lý chỉ định y khoa - chạy 1 lần / hồ sơ hành chính,
