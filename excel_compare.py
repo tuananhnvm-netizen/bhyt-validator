@@ -525,6 +525,177 @@ def feature_pivot_nhanh(df, index_col, col_col, value_col, aggfunc="sum"):
         return None, str(e)
 
 
+# ====================== NHÓM PHÂN TÍCH NÂNG CAO ======================
+
+def feature_trend_analysis(df, col_ngay, col_gia_tri, col_nhom=None, ky="M"):
+    """Phân tích xu hướng theo thời gian, tính tốc độ tăng trưởng MoM/QoQ"""
+    result = df.copy()
+    parsed = pd.to_datetime(result[col_ngay], errors="coerce", dayfirst=True)
+    result["__Date__"] = parsed
+    result["__Val__"] = pd.to_numeric(result[col_gia_tri], errors="coerce").fillna(0)
+    label_map = {"M": "Tháng", "Q": "Quý", "Y": "Năm"}
+    result["__Ky__"] = result["__Date__"].dt.to_period(ky).astype(str)
+    group_cols = ["__Ky__"]
+    if col_nhom and col_nhom in result.columns:
+        group_cols.append(col_nhom)
+    agg = result.groupby(group_cols).agg(
+        Tổng=("__Val__", "sum"),
+        Số_hồ_sơ=("__Val__", "count"),
+        Trung_bình=("__Val__", "mean"),
+    ).round(0).reset_index()
+    agg.rename(columns={"__Ky__": label_map.get(ky, "Kỳ")}, inplace=True)
+    ky_col = label_map.get(ky, "Kỳ")
+    if col_nhom is None:
+        agg["Tăng_trưởng (%)"] = agg["Tổng"].pct_change().mul(100).round(2)
+        agg["Tăng_trưởng (%)"] = agg["Tăng_trưởng (%)"].fillna(0)
+    return agg, ky_col
+
+
+def feature_auto_report_bhyt(df, col_ngay, col_khoa, col_benh, col_tien_bhyt, col_tien_tt):
+    """Tạo báo cáo BHYT đa chiều tự động: theo khoa, theo nhóm bệnh, theo tháng"""
+    r = df.copy()
+    r["__BHYT__"] = pd.to_numeric(r[col_tien_bhyt], errors="coerce").fillna(0)
+    r["__TT__"] = pd.to_numeric(r[col_tien_tt], errors="coerce").fillna(0)
+    r["__Tong__"] = r["__BHYT__"] + r["__TT__"]
+    # Parse date
+    parsed = pd.to_datetime(r[col_ngay], errors="coerce", dayfirst=True)
+    r["__Thang__"] = parsed.dt.to_period("M").astype(str)
+    # 1. Theo khoa
+    theo_khoa = r.groupby(col_khoa).agg(
+        Số_hồ_sơ=("__Tong__", "count"),
+        Tiền_BHYT=("__BHYT__", "sum"),
+        Tiền_tự_trả=("__TT__", "sum"),
+        Tổng_chi_phí=("__Tong__", "sum"),
+        TB_chi_phí=("__Tong__", "mean"),
+    ).round(0).reset_index()
+    theo_khoa["Tỷ_lệ_BHYT (%)"] = (theo_khoa["Tiền_BHYT"] / theo_khoa["Tổng_chi_phí"] * 100).round(1)
+    theo_khoa = theo_khoa.sort_values("Tổng_chi_phí", ascending=False)
+    # 2. Theo bệnh
+    theo_benh = r.groupby(col_benh).agg(
+        Số_lượt=("__Tong__", "count"),
+        Tiền_BHYT=("__BHYT__", "sum"),
+        Tổng_chi_phí=("__Tong__", "sum"),
+    ).round(0).reset_index()
+    theo_benh = theo_benh.sort_values("Tổng_chi_phí", ascending=False).head(50)
+    # 3. Theo tháng
+    theo_thang = r.groupby("__Thang__").agg(
+        Số_hồ_sơ=("__Tong__", "count"),
+        Tiền_BHYT=("__BHYT__", "sum"),
+        Tiền_tự_trả=("__TT__", "sum"),
+        Tổng_chi_phí=("__Tong__", "sum"),
+    ).round(0).reset_index().rename(columns={"__Thang__": "Tháng"})
+    theo_thang["Tăng_trưởng (%)"] = theo_thang["Tổng_chi_phí"].pct_change().mul(100).round(2).fillna(0)
+    # 4. Tổng quan
+    tong_quan = pd.DataFrame([{
+        "Chỉ tiêu": "Tổng hồ sơ", "Giá trị": f"{len(r):,}",
+        "Chỉ tiêu 2": "Tổng tiền BHYT", "Giá trị 2": f"{r['__BHYT__'].sum():,.0f} đ",
+    }, {
+        "Chỉ tiêu": "Số khoa", "Giá trị": f"{r[col_khoa].nunique()}",
+        "Chỉ tiêu 2": "Tổng tiền tự trả", "Giá trị 2": f"{r['__TT__'].sum():,.0f} đ",
+    }, {
+        "Chỉ tiêu": "Số nhóm bệnh", "Giá trị": f"{r[col_benh].nunique()}",
+        "Chỉ tiêu 2": "Tổng chi phí", "Giá trị 2": f"{r['__Tong__'].sum():,.0f} đ",
+    }, {
+        "Chỉ tiêu": "Chi phí TB/hồ sơ", "Giá trị": f"{r['__Tong__'].mean():,.0f} đ",
+        "Chỉ tiêu 2": "Tỷ lệ BHYT TB", "Giá trị 2": f"{(r['__BHYT__'].sum()/r['__Tong__'].sum()*100):.1f}%",
+    }])
+    return tong_quan, theo_khoa, theo_benh, theo_thang
+
+
+def feature_find_replace_bulk(df, operations):
+    """Tìm & thay thế hàng loạt: nhiều cột, nhiều cặp tìm/thay, hỗ trợ regex"""
+    result = df.copy()
+    log = []
+    for op in operations:
+        col = op.get("col")
+        find = op.get("find", "")
+        replace = op.get("replace", "")
+        use_regex = op.get("regex", False)
+        case_sensitive = op.get("case", False)
+        if not col or col not in result.columns or not find:
+            continue
+        before = result[col].copy()
+        try:
+            if use_regex:
+                flags = 0 if case_sensitive else re.IGNORECASE
+                result[col] = result[col].astype(str).str.replace(find, replace, regex=True, flags=flags)
+            else:
+                if case_sensitive:
+                    result[col] = result[col].astype(str).str.replace(find, replace, regex=False)
+                else:
+                    result[col] = result[col].astype(str).str.replace(
+                        find, replace, regex=False, case=False
+                    )
+            changed = (before.astype(str) != result[col].astype(str)).sum()
+            log.append({"Cột": col, "Tìm": find, "Thay bằng": replace, "Regex": use_regex, "Số dòng thay": changed})
+        except Exception as e:
+            log.append({"Cột": col, "Tìm": find, "Thay bằng": replace, "Regex": use_regex, "Số dòng thay": f"Lỗi: {e}"})
+    return result, pd.DataFrame(log)
+
+
+def feature_rank_top_n(df, group_col, value_col, n=10, agg_func="sum", ascending=False):
+    """Xếp hạng và lấy Top-N theo nhóm, có tính tỷ trọng"""
+    result = df.copy()
+    result["__Val__"] = pd.to_numeric(result[value_col], errors="coerce").fillna(0)
+    if group_col:
+        grouped = result.groupby(group_col)["__Val__"].agg(agg_func).round(0).reset_index()
+        grouped.columns = [group_col, f"{agg_func.upper()}_{value_col}"]
+        val_col_name = f"{agg_func.upper()}_{value_col}"
+    else:
+        grouped = result[[value_col]].copy()
+        grouped["__Val__"] = pd.to_numeric(grouped[value_col], errors="coerce").fillna(0)
+        grouped = grouped.rename(columns={"__Val__": f"{agg_func.upper()}_{value_col}"})
+        val_col_name = f"{agg_func.upper()}_{value_col}"
+    grouped = grouped.sort_values(val_col_name, ascending=ascending).reset_index(drop=True)
+    grouped.insert(0, "Hạng", range(1, len(grouped) + 1))
+    total = grouped[val_col_name].sum()
+    grouped["Tỷ_trọng (%)"] = (grouped[val_col_name] / total * 100).round(2) if total > 0 else 0
+    grouped["Tỷ_trọng_cộng_dồn (%)"] = grouped["Tỷ_trọng (%)"].cumsum().round(2)
+    top_n = grouped.head(n).copy()
+    return grouped, top_n
+
+
+def feature_conditional_flag(df, rules):
+    """Gắn nhãn / phân loại dòng theo nhiều điều kiện kết hợp (IF-THEN logic)"""
+    result = df.copy()
+    result["__Nhãn__"] = "Không xác định"
+    for rule in rules:
+        conditions = rule.get("conditions", [])
+        label = rule.get("label", "?")
+        mask = pd.Series([True] * len(result), index=result.index)
+        for cond in conditions:
+            col = cond.get("col")
+            op = cond.get("op")
+            val = str(cond.get("val", ""))
+            if col not in result.columns:
+                continue
+            s = result[col].astype(str).str.strip()
+            if op == "=":
+                mask &= s.str.upper() == val.upper()
+            elif op == "≠":
+                mask &= s.str.upper() != val.upper()
+            elif op == "chứa":
+                mask &= s.str.contains(val, case=False, na=False)
+            elif op == ">":
+                try:
+                    mask &= pd.to_numeric(result[col], errors="coerce") > float(val)
+                except Exception:
+                    pass
+            elif op == "<":
+                try:
+                    mask &= pd.to_numeric(result[col], errors="coerce") < float(val)
+                except Exception:
+                    pass
+            elif op == "trống":
+                mask &= (s == "") | (s.str.upper() == "NAN")
+            elif op == "không trống":
+                mask &= (s != "") & (s.str.upper() != "NAN")
+        result.loc[mask, "__Nhãn__"] = label
+    summary = result["__Nhãn__"].value_counts().reset_index()
+    summary.columns = ["Nhãn", "Số dòng"]
+    return result, summary
+
+
 # ====================== MAIN TAB RENDER ======================
 
 def render_excel_compare_tab():
@@ -576,6 +747,7 @@ def render_excel_compare_tab():
         "👥 Nhân sự & Lương",
         "🔍 Kiểm soát & Phát hiện lỗi",
         "🔄 Chuyển đổi & Tái cấu trúc dữ liệu",
+        "🔬 Phân tích nâng cao",
     ], key="ec_nhom")
 
     features_map = {
@@ -615,6 +787,13 @@ def render_excel_compare_tab():
             "23. Tách cột (họ tên / ngày tháng / ký tự phân cách)",
             "24. Chuyển đổi định dạng ngày tháng",
             "25. Gộp nhiều cột thành 1",
+        ],
+        "🔬 Phân tích nâng cao": [
+            "26. Phân tích xu hướng & tăng trưởng theo thời gian",
+            "27. Báo cáo BHYT tổng hợp đa chiều (tự động)",
+            "28. Tìm & Thay thế hàng loạt (hỗ trợ Regex)",
+            "29. Xếp hạng & Top-N theo nhóm (Pareto 80/20)",
+            "30. Phân loại & gắn nhãn dữ liệu (IF-THEN đa điều kiện)",
         ],
     }
 
@@ -1240,3 +1419,164 @@ def render_excel_compare_tab():
             st.dataframe(result[cols_gop + [ten_moi]], use_container_width=True)
             dl_btn("📥 Tải file đã gộp cột", to_excel_bytes(result), f"gop_cot_{ts}.xlsx", "dl_gc")
 
+    # ============================================================
+    # NHÓM 7: PHÂN TÍCH NÂNG CAO
+    # ============================================================
+
+    elif feature.startswith("26."):
+        st.markdown("##### 📈 Phân tích xu hướng & tăng trưởng theo thời gian")
+        src = st.selectbox("Chọn file:", list(dfs.keys()), key="tr_src")
+        df = dfs[src]
+        c1, c2, c3, c4 = st.columns(4)
+        col_ngay = c1.selectbox("Cột ngày:", df.columns.tolist(), key="tr_ngay")
+        col_val = c2.selectbox("Cột giá trị (số):", df.columns.tolist(), key="tr_val")
+        col_nhom = c3.selectbox("Nhóm theo (tùy chọn):", ["— Không —"] + df.columns.tolist(), key="tr_nhom")
+        ky = c4.selectbox("Kỳ phân tích:", {"M": "Tháng", "Q": "Quý", "Y": "Năm"},
+                          format_func=lambda x: {"M": "📅 Tháng", "Q": "📅 Quý", "Y": "📅 Năm"}[x], key="tr_ky")
+        col_nhom_real = None if col_nhom == "— Không —" else col_nhom
+        if st.button("🚀 PHÂN TÍCH XU HƯỚNG", type="primary", use_container_width=True, key="btn_tr"):
+            with st.spinner("Đang phân tích..."):
+                trend, ky_col = feature_trend_analysis(df, col_ngay, col_val, col_nhom_real, ky)
+            st.dataframe(trend, use_container_width=True)
+            # Chart
+            if col_nhom_real is None:
+                chart_data = trend.set_index(ky_col)[["Tổng"]].copy()
+                st.subheader("📊 Biểu đồ xu hướng tổng chi phí")
+                st.bar_chart(chart_data)
+                growth = trend[["Tăng_trưởng (%)"]].copy()
+                st.subheader("📈 Tốc độ tăng trưởng (%)")
+                st.line_chart(growth)
+            else:
+                pivot_chart = trend.pivot_table(index=ky_col, columns=col_nhom_real, values="Tổng", fill_value=0)
+                st.subheader(f"📊 Biểu đồ theo {col_nhom_real}")
+                st.bar_chart(pivot_chart)
+            dl_btn("📥 Tải bảng xu hướng", to_excel_bytes(trend), f"xu_huong_{ts}.xlsx", "dl_tr")
+
+    elif feature.startswith("27."):
+        st.markdown("##### 📋 Báo cáo BHYT tổng hợp đa chiều (tự động)")
+        src = st.selectbox("Chọn file:", list(dfs.keys()), key="ar_src")
+        df = dfs[src]
+        st.caption("Chọn các cột tương ứng trong file dữ liệu:")
+        c1, c2, c3 = st.columns(3)
+        col_ngay = c1.selectbox("Cột ngày KCB:", df.columns.tolist(), key="ar_ngay")
+        col_khoa = c2.selectbox("Cột khoa/phòng:", df.columns.tolist(), key="ar_khoa")
+        col_benh = c3.selectbox("Cột mã bệnh / nhóm bệnh:", df.columns.tolist(), key="ar_benh")
+        c4, c5 = st.columns(2)
+        col_bhyt = c4.selectbox("Cột tiền BHYT:", df.columns.tolist(), key="ar_bhyt")
+        col_tt = c5.selectbox("Cột tiền tự trả:", df.columns.tolist(), key="ar_tt")
+        if st.button("🚀 TẠO BÁO CÁO ĐA CHIỀU", type="primary", use_container_width=True, key="btn_ar"):
+            with st.spinner("Đang tổng hợp báo cáo..."):
+                tq, theo_khoa, theo_benh, theo_thang = feature_auto_report_bhyt(
+                    df, col_ngay, col_khoa, col_benh, col_bhyt, col_tt)
+            st.subheader("📌 Tổng quan")
+            st.dataframe(tq, use_container_width=True, hide_index=True)
+            st.subheader("🏥 Theo khoa / phòng")
+            st.dataframe(theo_khoa, use_container_width=True, hide_index=True)
+            chart_khoa = theo_khoa.set_index(col_khoa)[["Tổng_chi_phí"]].head(15)
+            st.bar_chart(chart_khoa)
+            st.subheader("🗓️ Theo tháng")
+            st.dataframe(theo_thang, use_container_width=True, hide_index=True)
+            chart_thang = theo_thang.set_index("Tháng")[["Tiền_BHYT", "Tiền_tự_trả"]]
+            st.bar_chart(chart_thang)
+            st.subheader("🦠 Top 50 nhóm bệnh chi phí cao nhất")
+            st.dataframe(theo_benh, use_container_width=True, hide_index=True)
+            all_sheets = {
+                "Tổng quan": tq,
+                "Theo khoa": theo_khoa,
+                "Theo nhóm bệnh": theo_benh,
+                "Theo tháng": theo_thang,
+            }
+            dl_btn("📥 Tải báo cáo đa chiều (Excel)", multi_sheet_excel(all_sheets), f"BC_BHYT_DA_CHIEU_{ts}.xlsx", "dl_ar")
+
+    elif feature.startswith("28."):
+        st.markdown("##### 🔁 Tìm & Thay thế hàng loạt (hỗ trợ Regex)")
+        src = st.selectbox("Chọn file:", list(dfs.keys()), key="fr_src")
+        df = dfs[src]
+        num_ops = st.number_input("Số phép thay thế:", min_value=1, max_value=20, value=1, key="fr_num")
+        operations = []
+        for i in range(int(num_ops)):
+            st.markdown(f"**Phép #{i+1}**")
+            cc = st.columns([3, 3, 3, 1, 1])
+            col_s = cc[0].selectbox(f"Cột #{i+1}:", df.columns.tolist(), key=f"fr_col_{i}")
+            find_s = cc[1].text_input(f"Tìm:", key=f"fr_find_{i}")
+            repl_s = cc[2].text_input(f"Thay bằng:", key=f"fr_repl_{i}")
+            is_regex = cc[3].checkbox("Regex", key=f"fr_rx_{i}")
+            is_case = cc[4].checkbox("A≠a", key=f"fr_cs_{i}")
+            operations.append({"col": col_s, "find": find_s, "replace": repl_s, "regex": is_regex, "case": is_case})
+        if st.button("🚀 THỰC HIỆN THAY THẾ", type="primary", use_container_width=True, key="btn_fr"):
+            with st.spinner("Đang xử lý..."):
+                result, log = feature_find_replace_bulk(df, operations)
+            if not log.empty:
+                total_changed = log["Số dòng thay"].apply(lambda x: x if isinstance(x, int) else 0).sum()
+                st.success(f"✅ Hoàn thành — tổng {total_changed:,} ô được thay thế")
+                st.dataframe(log, use_container_width=True, hide_index=True)
+            st.dataframe(result, use_container_width=True)
+            dl_btn("📥 Tải file đã thay thế", to_excel_bytes(result), f"find_replace_{ts}.xlsx", "dl_fr")
+
+    elif feature.startswith("29."):
+        st.markdown("##### 🏆 Xếp hạng & Top-N theo nhóm (Pareto 80/20)")
+        src = st.selectbox("Chọn file:", list(dfs.keys()), key="rk_src")
+        df = dfs[src]
+        c1, c2, c3, c4, c5 = st.columns(5)
+        group_col = c1.selectbox("Nhóm theo cột:", ["— Không nhóm —"] + df.columns.tolist(), key="rk_group")
+        val_col = c2.selectbox("Cột giá trị:", df.columns.tolist(), key="rk_val")
+        agg_fn = c3.selectbox("Hàm:", ["sum", "count", "mean", "max"], key="rk_agg")
+        top_n = c4.number_input("Top N:", min_value=5, max_value=500, value=20, key="rk_n")
+        order = c5.radio("Sắp xếp:", ["Cao → Thấp", "Thấp → Cao"], key="rk_order")
+        group_col_real = None if group_col == "— Không nhóm —" else group_col
+        asc = order == "Thấp → Cao"
+        if st.button("🚀 XẾP HẠNG", type="primary", use_container_width=True, key="btn_rk"):
+            with st.spinner("Đang xếp hạng..."):
+                full, top = feature_rank_top_n(df, group_col_real, val_col, int(top_n), agg_fn, ascending=asc)
+            val_col_name = f"{agg_fn.upper()}_{val_col}"
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Tổng nhóm", f"{len(full):,}")
+            top_pct = top["Tỷ_trọng (%)"].sum()
+            m2.metric(f"Top {int(top_n)} chiếm", f"{top_pct:.1f}% tổng giá trị")
+            pareto_n = (full["Tỷ_trọng_cộng_dồn (%)"] <= 80).sum()
+            m3.metric("Nhóm đạt 80% giá trị (Pareto)", f"{pareto_n}")
+            st.subheader(f"🏆 Top {int(top_n)}")
+            st.dataframe(top, use_container_width=True, hide_index=True)
+            if group_col_real:
+                chart_top = top.set_index(group_col_real)[[val_col_name]].head(20)
+                st.bar_chart(chart_top)
+            st.subheader("📋 Bảng xếp hạng đầy đủ")
+            st.dataframe(full, use_container_width=True, hide_index=True)
+            sheets = {f"Top {int(top_n)}": top, "Xếp hạng đầy đủ": full}
+            dl_btn("📥 Tải bảng xếp hạng", multi_sheet_excel(sheets), f"xep_hang_{ts}.xlsx", "dl_rk")
+
+    elif feature.startswith("30."):
+        st.markdown("##### 🏷️ Phân loại & gắn nhãn dữ liệu (IF-THEN đa điều kiện)")
+        src = st.selectbox("Chọn file:", list(dfs.keys()), key="fl_src")
+        df = dfs[src]
+        st.caption("Định nghĩa các quy tắc phân loại (ưu tiên từ trên xuống dưới):")
+        num_rules = st.number_input("Số quy tắc:", min_value=1, max_value=10, value=2, key="fl_num")
+        rules = []
+        ops_list = ["=", "≠", "chứa", ">", "<", "trống", "không trống"]
+        for r_i in range(int(num_rules)):
+            with st.expander(f"📌 Quy tắc #{r_i+1}", expanded=(r_i == 0)):
+                label = st.text_input(f"Nhãn kết quả #{r_i+1}:", value=f"Loại {r_i+1}", key=f"fl_lbl_{r_i}")
+                num_conds = st.number_input(f"Số điều kiện trong quy tắc #{r_i+1}:", min_value=1, max_value=5, value=1, key=f"fl_nc_{r_i}")
+                conditions = []
+                for c_i in range(int(num_conds)):
+                    cc = st.columns([3, 2, 3])
+                    c_col = cc[0].selectbox(f"Cột:", df.columns.tolist(), key=f"fl_col_{r_i}_{c_i}")
+                    c_op = cc[1].selectbox(f"Điều kiện:", ops_list, key=f"fl_op_{r_i}_{c_i}")
+                    c_val = cc[2].text_input(f"Giá trị:", key=f"fl_val_{r_i}_{c_i}") if c_op not in ["trống", "không trống"] else ""
+                    conditions.append({"col": c_col, "op": c_op, "val": c_val})
+                rules.append({"label": label, "conditions": conditions})
+        if st.button("🚀 GẮN NHÃN", type="primary", use_container_width=True, key="btn_fl"):
+            with st.spinner("Đang phân loại..."):
+                result, summary = feature_conditional_flag(df, rules)
+            st.subheader("📊 Kết quả phân loại")
+            st.dataframe(summary, use_container_width=True, hide_index=True)
+            chart_data = summary.set_index("Nhãn")
+            st.bar_chart(chart_data)
+            st.subheader("📋 Dữ liệu đã gắn nhãn")
+            label_col_name = "__Nhãn__"
+            filter_label = st.selectbox("Lọc theo nhãn:", ["— Tất cả —"] + result[label_col_name].unique().tolist(), key="fl_filter")
+            display_df = result if filter_label == "— Tất cả —" else result[result[label_col_name] == filter_label]
+            st.dataframe(display_df, use_container_width=True)
+            result_renamed = result.rename(columns={"__Nhãn__": "Phân_loại"})
+            sheets = {"Dữ liệu gắn nhãn": result_renamed, "Thống kê phân loại": summary}
+            dl_btn("📥 Tải kết quả phân loại", multi_sheet_excel(sheets), f"phan_loai_{ts}.xlsx", "dl_fl")
