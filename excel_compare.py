@@ -7,6 +7,7 @@ from openpyxl import load_workbook
 from openpyxl.styles import PatternFill, Font, Alignment
 from openpyxl.utils import get_column_letter
 import re
+import zipfile
 
 
 # ====================== HELPER FUNCTIONS ======================
@@ -698,6 +699,115 @@ def feature_conditional_flag(df, rules):
 
 # ====================== MAIN TAB RENDER ======================
 
+# ===== NEW: NHÓM BỔ SUNG (31–35) =====
+
+def feature_ty_le_xuat_toan(df, col_khoa, col_de_nghi, col_duyet):
+    """Tính tỷ lệ xuất toán / từ chối thanh toán BHYT theo khoa"""
+    result = df.copy()
+    result["__DeNghi__"] = pd.to_numeric(result[col_de_nghi], errors="coerce").fillna(0)
+    result["__Duyet__"] = pd.to_numeric(result[col_duyet], errors="coerce").fillna(0)
+    result["__XuatToan__"] = (result["__DeNghi__"] - result["__Duyet__"]).clip(lower=0)
+    tong = result.groupby(col_khoa).agg(
+        So_ho_so=("__DeNghi__", "count"),
+        Tien_de_nghi=("__DeNghi__", "sum"),
+        Tien_duyet=("__Duyet__", "sum"),
+        Tien_xuat_toan=("__XuatToan__", "sum"),
+    ).round(0).reset_index()
+    tong.columns = [col_khoa, "Số hồ sơ", "Tiền đề nghị (đ)", "Tiền được duyệt (đ)", "Tiền xuất toán (đ)"]
+    tong["Tỷ lệ xuất toán (%)"] = tong.apply(
+        lambda r: round(r["Tiền xuất toán (đ)"] / r["Tiền đề nghị (đ)"] * 100, 2) if r["Tiền đề nghị (đ)"] > 0 else 0.0,
+        axis=1,
+    )
+    tong = tong.sort_values("Tỷ lệ xuất toán (%)", ascending=False).reset_index(drop=True)
+    return result, tong
+
+
+def feature_so_sanh_bien_dong(df1, df2, group_col1, group_col2, value_col1, value_col2, agg_func="sum"):
+    """So sánh biến động tổng hợp giữa 2 kỳ (kỳ trước / kỳ này)"""
+    r1 = df1.copy()
+    r2 = df2.copy()
+    r1["__val__"] = pd.to_numeric(r1[value_col1], errors="coerce").fillna(0)
+    r2["__val__"] = pd.to_numeric(r2[value_col2], errors="coerce").fillna(0)
+    g1 = r1.groupby(group_col1)["__val__"].agg(agg_func).reset_index()
+    g1.columns = ["Nhóm", "Kỳ trước"]
+    g2 = r2.groupby(group_col2)["__val__"].agg(agg_func).reset_index()
+    g2.columns = ["Nhóm", "Kỳ này"]
+    merged = pd.merge(g1, g2, on="Nhóm", how="outer").fillna(0)
+    merged["Chênh lệch"] = (merged["Kỳ này"] - merged["Kỳ trước"]).round(0)
+
+    def _pct(r):
+        if r["Kỳ trước"] != 0:
+            return round(r["Chênh lệch"] / r["Kỳ trước"] * 100, 2)
+        return 100.0 if r["Kỳ này"] > 0 else 0.0
+
+    merged["Biến động (%)"] = merged.apply(_pct, axis=1)
+    merged = merged.sort_values("Chênh lệch", ascending=False).reset_index(drop=True)
+    return merged
+
+
+def feature_tach_file_theo_nhom(df, group_col):
+    """Tách 1 file thành nhiều nhóm theo giá trị cột (khoa/phòng...)"""
+    groups = {}
+    for val, sub in df.groupby(group_col):
+        name = re.sub(r'[\\/*?:"<>|\[\]]', "_", str(val).strip()) or "Khong_xac_dinh"
+        groups[name] = sub.reset_index(drop=True)
+    return groups
+
+
+def feature_kiem_tra_dinh_dang_lienlac(df, col, loai="sdt"):
+    """Kiểm tra định dạng số điện thoại / email / số CCCD"""
+    result = df.copy()
+
+    def _check_sdt(x):
+        x = str(x).strip().replace(" ", "").replace(".", "").replace("-", "")
+        return bool(re.fullmatch(r"(0|\+84)[0-9]{9,10}", x))
+
+    def _check_email(x):
+        return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", str(x).strip()))
+
+    def _check_cccd(x):
+        return bool(re.fullmatch(r"[0-9]{9}|[0-9]{12}", str(x).strip()))
+
+    checker = {"sdt": _check_sdt, "email": _check_email, "cccd": _check_cccd}[loai]
+
+    def _status(x):
+        s = str(x).strip()
+        if s == "":
+            return "— Trống —"
+        return "✅ Hợp lệ" if checker(s) else "❌ Sai định dạng"
+
+    result["__TrangThai__"] = result[col].apply(_status)
+    loi = result[result["__TrangThai__"] == "❌ Sai định dạng"]
+    summary = result["__TrangThai__"].value_counts().reset_index()
+    summary.columns = ["Trạng thái", "Số dòng"]
+    return result, loi, summary
+
+
+def feature_dashboard_kpi_khoa(df, col_khoa, col_tien, col_ma_bn=None):
+    """Dashboard KPI theo khoa/phòng: số lượt, số BN, tổng & TB chi phí, tỷ trọng"""
+    result = df.copy()
+    result["__Tien__"] = pd.to_numeric(result[col_tien], errors="coerce").fillna(0)
+    if col_ma_bn:
+        kpi = result.groupby(col_khoa).agg(
+            So_luot=(col_ma_bn, "count"),
+            So_BN_duy_nhat=(col_ma_bn, "nunique"),
+            Tong_chi_phi=("__Tien__", "sum"),
+            Chi_phi_TB=("__Tien__", "mean"),
+        ).round(0).reset_index()
+        kpi.columns = [col_khoa, "Số lượt", "Số BN duy nhất", "Tổng chi phí (đ)", "Chi phí TB/lượt (đ)"]
+    else:
+        kpi = result.groupby(col_khoa).agg(
+            So_luot=("__Tien__", "count"),
+            Tong_chi_phi=("__Tien__", "sum"),
+            Chi_phi_TB=("__Tien__", "mean"),
+        ).round(0).reset_index()
+        kpi.columns = [col_khoa, "Số lượt", "Tổng chi phí (đ)", "Chi phí TB/lượt (đ)"]
+    tong = kpi["Tổng chi phí (đ)"].sum()
+    kpi["Tỷ trọng (%)"] = (kpi["Tổng chi phí (đ)"] / tong * 100).round(2) if tong > 0 else 0.0
+    kpi = kpi.sort_values("Tổng chi phí (đ)", ascending=False).reset_index(drop=True)
+    return kpi
+
+
 def render_excel_compare_tab():
     st.markdown("### 📊 Công cụ xử lý Excel nâng cao")
 
@@ -767,6 +877,7 @@ def render_excel_compare_tab():
             "11. Kiểm tra vượt trần quỹ BHYT theo khoa",
             "12. Báo cáo tổng hợp theo tháng / quý",
             "13. Pivot nhanh — Tổng hợp đa chiều",
+            "31. Tỷ lệ xuất toán / từ chối thanh toán BHYT theo khoa",
         ],
         "💊 Thuốc & Vật tư y tế": [
             "14. Kiểm tra hạn sử dụng thuốc / vật tư",
@@ -782,11 +893,13 @@ def render_excel_compare_tab():
             "20. Kiểm tra định dạng mã thẻ BHYT / mã BN",
             "21. Phát hiện số âm & giá trị bất thường",
             "22. Kiểm tra ngày tháng sai định dạng",
+            "34. Kiểm tra định dạng SĐT / Email / Số CCCD",
         ],
         "🔄 Chuyển đổi & Tái cấu trúc dữ liệu": [
             "23. Tách cột (họ tên / ngày tháng / ký tự phân cách)",
             "24. Chuyển đổi định dạng ngày tháng",
             "25. Gộp nhiều cột thành 1",
+            "33. Tách 1 file thành nhiều file theo nhóm (xuất ZIP)",
         ],
         "🔬 Phân tích nâng cao": [
             "26. Phân tích xu hướng & tăng trưởng theo thời gian",
@@ -794,6 +907,8 @@ def render_excel_compare_tab():
             "28. Tìm & Thay thế hàng loạt (hỗ trợ Regex)",
             "29. Xếp hạng & Top-N theo nhóm (Pareto 80/20)",
             "30. Phân loại & gắn nhãn dữ liệu (IF-THEN đa điều kiện)",
+            "32. So sánh biến động giữa 2 kỳ (kỳ trước / kỳ này)",
+            "35. Dashboard KPI theo khoa / phòng",
         ],
     }
 
@@ -1580,3 +1695,124 @@ def render_excel_compare_tab():
             result_renamed = result.rename(columns={"__Nhãn__": "Phân_loại"})
             sheets = {"Dữ liệu gắn nhãn": result_renamed, "Thống kê phân loại": summary}
             dl_btn("📥 Tải kết quả phân loại", multi_sheet_excel(sheets), f"phan_loai_{ts}.xlsx", "dl_fl")
+
+    # ============================================================
+    # NHÓM BỔ SUNG: 31–35
+    # ============================================================
+
+    elif feature.startswith("31."):
+        st.markdown("##### 📉 Tỷ lệ xuất toán / từ chối thanh toán BHYT theo khoa")
+        src = st.selectbox("Chọn file:", list(dfs.keys()), key="xt_src")
+        df = dfs[src]
+        c1, c2, c3 = st.columns(3)
+        col_khoa = c1.selectbox("Cột khoa / phòng:", df.columns.tolist(), key="xt_khoa")
+        col_de_nghi = c2.selectbox("Cột tiền đề nghị thanh toán:", df.columns.tolist(), key="xt_dn")
+        col_duyet = c3.selectbox("Cột tiền được duyệt (BHXH chấp nhận):", df.columns.tolist(), key="xt_dy")
+        if st.button("🚀 TÍNH TỶ LỆ XUẤT TOÁN", type="primary", use_container_width=True, key="btn_xt"):
+            with st.spinner("Đang tính toán..."):
+                result, tong = feature_ty_le_xuat_toan(df, col_khoa, col_de_nghi, col_duyet)
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Tổng tiền đề nghị", f"{result['__DeNghi__'].sum():,.0f} đ")
+            m2.metric("Tổng tiền được duyệt", f"{result['__Duyet__'].sum():,.0f} đ")
+            m3.metric("Tổng tiền xuất toán", f"{result['__XuatToan__'].sum():,.0f} đ")
+            st.subheader("📊 Tỷ lệ xuất toán theo khoa")
+            st.dataframe(tong, use_container_width=True, hide_index=True)
+            st.bar_chart(tong.set_index(col_khoa)[["Tỷ lệ xuất toán (%)"]])
+            sheets = {"Chi tiết": result.drop(columns=["__DeNghi__", "__Duyet__", "__XuatToan__"]), "Tổng hợp theo khoa": tong}
+            dl_btn("📥 Tải báo cáo xuất toán", multi_sheet_excel(sheets), f"ty_le_xuat_toan_{ts}.xlsx", "dl_xt")
+
+    elif feature.startswith("32."):
+        st.markdown("##### 📈 So sánh biến động giữa 2 kỳ (kỳ trước / kỳ này)")
+        if len(dfs) < 2:
+            st.warning("⚠️ Cần tải lên ít nhất 2 file (mỗi file là 1 kỳ báo cáo).")
+            return
+        fkeys = list(dfs.keys())
+        c1, c2 = st.columns(2)
+        src1 = c1.selectbox("File kỳ trước:", fkeys, key="bd_src1")
+        src2 = c2.selectbox("File kỳ này:", [k for k in fkeys if k != src1], key="bd_src2")
+        df1, df2 = dfs[src1], dfs[src2]
+        c3, c4 = st.columns(2)
+        group1 = c3.selectbox("Cột nhóm (File kỳ trước):", df1.columns.tolist(), key="bd_g1")
+        group2 = c4.selectbox("Cột nhóm (File kỳ này):", df2.columns.tolist(), key="bd_g2")
+        c5, c6, c7 = st.columns(3)
+        val1 = c5.selectbox("Cột giá trị (File kỳ trước):", df1.columns.tolist(), key="bd_v1")
+        val2 = c6.selectbox("Cột giá trị (File kỳ này):", df2.columns.tolist(), key="bd_v2")
+        agg = c7.selectbox("Hàm tổng hợp:", ["sum", "count", "mean"], key="bd_agg")
+        if st.button("🚀 SO SÁNH BIẾN ĐỘNG", type="primary", use_container_width=True, key="btn_bd"):
+            with st.spinner("Đang so sánh..."):
+                merged = feature_so_sanh_bien_dong(df1, df2, group1, group2, val1, val2, agg)
+            m1, m2 = st.columns(2)
+            m1.metric("Tổng kỳ trước", f"{merged['Kỳ trước'].sum():,.0f}")
+            m2.metric("Tổng kỳ này", f"{merged['Kỳ này'].sum():,.0f}")
+            st.subheader("📋 Bảng biến động theo nhóm")
+            st.dataframe(merged, use_container_width=True, hide_index=True)
+            st.bar_chart(merged.set_index("Nhóm")[["Kỳ trước", "Kỳ này"]])
+            dl_btn("📥 Tải bảng biến động", multi_sheet_excel({"Biến động": merged}), f"bien_dong_2_ky_{ts}.xlsx", "dl_bd")
+
+    elif feature.startswith("33."):
+        st.markdown("##### 🗂️ Tách 1 file thành nhiều file theo nhóm (xuất ZIP)")
+        src = st.selectbox("Chọn file:", list(dfs.keys()), key="tf_src")
+        df = dfs[src]
+        group_col = st.selectbox("Tách theo cột:", df.columns.tolist(), key="tf_group")
+        if st.button("🚀 TÁCH FILE", type="primary", use_container_width=True, key="btn_tf"):
+            with st.spinner("Đang tách file..."):
+                groups = feature_tach_file_theo_nhom(df, group_col)
+            st.success(f"✅ Đã tách thành **{len(groups)}** nhóm theo cột **{group_col}**.")
+            summary = pd.DataFrame(
+                [{"Nhóm": k, "Số dòng": len(v)} for k, v in groups.items()]
+            ).sort_values("Số dòng", ascending=False)
+            st.dataframe(summary, use_container_width=True, hide_index=True)
+            zip_buf = BytesIO()
+            with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                for name, sub_df in groups.items():
+                    excel_bytes = to_excel_bytes(sub_df, sheet_name=str(name)[:31])
+                    zf.writestr(f"{name}.xlsx", excel_bytes.getvalue())
+            zip_buf.seek(0)
+            dl_btn("📥 Tải file ZIP (tất cả nhóm)", zip_buf, f"tach_file_{group_col}_{ts}.zip", "dl_tf")
+
+    elif feature.startswith("34."):
+        st.markdown("##### ☎️ Kiểm tra định dạng SĐT / Email / Số CCCD")
+        src = st.selectbox("Chọn file:", list(dfs.keys()), key="ld_src")
+        df = dfs[src]
+        c1, c2 = st.columns(2)
+        col = c1.selectbox("Cột cần kiểm tra:", df.columns.tolist(), key="ld_col")
+        loai = c2.selectbox("Loại định dạng:", {
+            "sdt": "Số điện thoại (VN)",
+            "email": "Email",
+            "cccd": "Số CCCD / CMND",
+        }, format_func=lambda x: {"sdt": "Số điện thoại (VN)", "email": "Email", "cccd": "Số CCCD / CMND"}[x], key="ld_loai")
+        if st.button("🚀 KIỂM TRA ĐỊNH DẠNG", type="primary", use_container_width=True, key="btn_ld"):
+            with st.spinner("Đang kiểm tra..."):
+                result, loi, summary = feature_kiem_tra_dinh_dang_lienlac(df, col, loai)
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Tổng số dòng", f"{len(result):,}")
+            m2.metric("Số dòng lỗi", f"{len(loi):,}")
+            m3.metric("Tỷ lệ lỗi", f"{(len(loi)/len(result)*100 if len(result) else 0):.1f}%")
+            st.subheader("📊 Thống kê trạng thái")
+            st.dataframe(summary, use_container_width=True, hide_index=True)
+            st.subheader("❌ Danh sách dòng sai định dạng")
+            st.dataframe(loi, use_container_width=True)
+            result_renamed = result.rename(columns={"__TrangThai__": "Trạng_thái"})
+            sheets = {"Toàn bộ dữ liệu": result_renamed, "Chỉ dòng lỗi": loi.rename(columns={"__TrangThai__": "Trạng_thái"})}
+            dl_btn("📥 Tải kết quả kiểm tra", multi_sheet_excel(sheets), f"kiem_tra_dinh_dang_{ts}.xlsx", "dl_ld")
+
+    elif feature.startswith("35."):
+        st.markdown("##### 📊 Dashboard KPI theo khoa / phòng")
+        src = st.selectbox("Chọn file:", list(dfs.keys()), key="kpi_src")
+        df = dfs[src]
+        c1, c2, c3 = st.columns(3)
+        col_khoa = c1.selectbox("Cột khoa / phòng:", df.columns.tolist(), key="kpi_khoa")
+        col_tien = c2.selectbox("Cột chi phí / số tiền:", df.columns.tolist(), key="kpi_tien")
+        col_ma_bn = c3.selectbox("Cột mã bệnh nhân (tùy chọn):", ["— Không —"] + df.columns.tolist(), key="kpi_bn")
+        col_ma_bn_real = None if col_ma_bn == "— Không —" else col_ma_bn
+        if st.button("🚀 TẠO DASHBOARD KPI", type="primary", use_container_width=True, key="btn_kpi"):
+            with st.spinner("Đang tổng hợp KPI..."):
+                kpi = feature_dashboard_kpi_khoa(df, col_khoa, col_tien, col_ma_bn_real)
+            m1, m2 = st.columns(2)
+            m1.metric("Số khoa / phòng", f"{len(kpi):,}")
+            m2.metric("Tổng chi phí", f"{kpi['Tổng chi phí (đ)'].sum():,.0f} đ")
+            st.subheader("📋 Bảng KPI theo khoa / phòng")
+            st.dataframe(kpi, use_container_width=True, hide_index=True)
+            st.subheader("📊 Tỷ trọng chi phí theo khoa")
+            st.bar_chart(kpi.set_index(col_khoa)[["Tổng chi phí (đ)"]])
+            dl_btn("📥 Tải bảng KPI", multi_sheet_excel({"KPI theo khoa": kpi}), f"dashboard_kpi_{ts}.xlsx", "dl_kpi")
